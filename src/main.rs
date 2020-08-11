@@ -1,14 +1,16 @@
-use sqlx::any::{AnyPoolOptions, AnyPool};
 use simplelog::{LevelFilter, Config, SimpleLogger};
 use warp::{Filter, Reply};
 use warp::reject::not_found;
 use serde::{Serialize, Deserialize};
-use sqlx::{Any, Executor, Pool, Database, Postgres};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{Executor, Pool, Database, Postgres, Row};
+use sqlx::postgres::{PgPoolOptions, PgRow};
 use chrono::Duration;
-use crate::cert::CertFacade;
+use crate::cert::{CertFacade, CertManager};
+use sqlx::migrate::Migrator;
 
 mod cert;
+
+static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
 struct Domain { id: String, username: String, password: String }
@@ -42,6 +44,12 @@ async fn main() -> Result<(), sqlx::Error> {
         .connect("postgresql://postgres:mysecretpassword@localhost/postgres")
         .await?;
 
+    MIGRATOR.run(&pool).await.unwrap();
+
+    /*let value = sqlx::query("select 1 + 1")
+        .try_map(|row: PgRow| row.try_get::<i32, _>(0))
+        .fetch_one(&pool)
+        .await.unwrap();*/
 
     /*let one_hour_ago = chrono::Local::now().naive_local() - Duration::seconds(1);
     let mut cert: Cert = sqlx::query_as("SELECT * FROM certs LIMIT 1")
@@ -49,12 +57,13 @@ async fn main() -> Result<(), sqlx::Error> {
 
 
     let cert_facade = CertFacade::new(pool.clone());
-    cert_facade.create_cert().await;
+    cert_facade.start().await;
+
+    CertManager::new(cert_facade).test().await;
 
     let facade_pool = pool.clone();
     let domain_facade = DomainFacade::new(facade_pool);
 
-    println!("Hello, world!");
 
     let hello = warp::path!("hello" / String)
         .and(warp::any().map(move || domain_facade.clone()));

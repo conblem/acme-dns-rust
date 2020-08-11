@@ -1,6 +1,8 @@
 use sqlx::{Database, FromRow, Pool, Postgres, Transaction, Executor};
 use chrono::naive::NaiveDateTime;
 use chrono::{Duration, Local};
+use acme_lib::{Directory, DirectoryUrl};
+use acme_lib::persist::MemoryPersist;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
@@ -23,7 +25,7 @@ impl <DB: Database> CertFacade<DB> {
 
 impl CertFacade<Postgres> {
     pub async fn find_by_id(&self, id: &str) -> Option<Cert> {
-        sqlx::query_as("SELECT * FROM certs WHERE id = $1 LIMIT 1")
+        sqlx::query_as("SELECT * FROM cert WHERE id = $1 LIMIT 1")
             .bind(id)
             .fetch_optional(&self.pool)
             .await
@@ -31,7 +33,7 @@ impl CertFacade<Postgres> {
     }
 
     async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
-        sqlx::query("UPDATE certs SET update = $1, state = $1 WHERE id = $3")
+        sqlx::query("UPDATE cert SET update = $1, state = $2 WHERE id = $3")
             .bind(&cert.update)
             .bind(&cert.state)
             .bind(&cert.id)
@@ -40,10 +42,20 @@ impl CertFacade<Postgres> {
             .unwrap();
     }
 
-    pub async fn create_cert(&self) {
+    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
+        sqlx::query("INSERT INTO cert (id, update, state) VALUES ($1, $2, $3)")
+            .bind(&cert.id)
+            .bind(&cert.update)
+            .bind(&cert.state)
+            .execute(executor)
+            .await
+            .unwrap();
+    }
+
+    pub async fn start(&self) {
         let mut transaction = self.pool.begin().await.unwrap();
 
-        let cert = sqlx::query_as::<Postgres, Cert>("SELECT * FROM certs LIMIT 1")
+        let cert = sqlx::query_as::<Postgres, Cert>("SELECT * FROM cert LIMIT 1")
             .fetch_optional(&mut transaction)
             .await
             .unwrap_or(None);
@@ -67,14 +79,42 @@ impl CertFacade<Postgres> {
                     state: State::Ok
                 };
 
-                sqlx::query("INSERT INTO certs (id, update, state) VALUES ($1, $2, $3)")
-                    .bind(&cert.id)
-                    .bind(&cert.update)
-                    .bind(&cert.state)
-                    .execute(&mut transaction).await.unwrap();
+                CertFacade::create_cert(&mut transaction, &cert).await;
             },
         }
 
         transaction.commit().await.unwrap();
+    }
+}
+
+pub struct CertManager<DB: Database> {
+    cert_facade: CertFacade<DB>
+}
+
+impl CertManager<Postgres> {
+    pub fn new(cert_facade: CertFacade<Postgres>) -> Self {
+        CertManager {
+            cert_facade
+        }
+    }
+
+    pub async fn test(&self) {
+        let url = DirectoryUrl::LetsEncryptStaging;
+        let persist = MemoryPersist::new();
+        let dir = Directory::from_url(persist, url).unwrap();
+        let order = tokio::task::spawn_blocking(move || {
+            let account = dir.account("acme-dns-rust@byom.de").unwrap();
+            let mut order = account.new_order("ns.wehrli.ml", &[]).unwrap();
+            let auths = order.authorizations().unwrap();
+
+            let call = auths[0].dns_challenge();
+            let proof = call.dns_proof();
+            call.validate(5000);
+            println!("{:?}", proof);
+
+            order
+        }).await.unwrap();
+
+        //self.cert_facade.start().await;
     }
 }
