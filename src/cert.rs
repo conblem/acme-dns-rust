@@ -154,21 +154,22 @@ impl CertManager<Postgres> {
         let url = DirectoryUrl::LetsEncryptStaging;
         let persist = MemoryPersist::new();
         let dir = Directory::from_url(persist, url).unwrap();
-        let call = tokio::task::spawn_blocking(move || {
+        let mut order = tokio::task::spawn_blocking(move || {
             let account = dir.account("acme-dns-rust@byom.de").unwrap();
-            let mut order = account.new_order("acme.wehrli.ml", &[]).unwrap();
-            let auths = order.authorizations().unwrap();
-
-            auths[0].dns_challenge()
+            account.new_order("acme.wehrli.ml", &[]).unwrap()
         }).await.unwrap();
 
+        let auths = order.authorizations().unwrap();
+        let call = auths[0].dns_challenge();
         let proof = call.dns_proof();
+
         domain.txt = Some(proof);
         DomainFacade::update_domain(&self.pool, &domain).await;
 
         //error handling
-        tokio::task::spawn_blocking(move || {
+        let ord_csr = tokio::task::spawn_blocking(move || {
             call.validate(5000);
+            order.refresh().unwrap()
         }).await.unwrap();
 
         CertFacade::stop(&self.pool, cert).await;
