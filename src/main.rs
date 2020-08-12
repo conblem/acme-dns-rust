@@ -1,102 +1,71 @@
 use simplelog::{LevelFilter, Config, SimpleLogger};
 use warp::{Filter, Reply};
 use warp::reject::not_found;
-use serde::{Serialize, Deserialize};
-use sqlx::{Executor, Pool, Database, Postgres, Row};
-use sqlx::postgres::{PgPoolOptions, PgRow};
-use chrono::Duration;
-use crate::cert::{CertFacade, CertManager};
+use sqlx::{Pool, Postgres};
+use sqlx::postgres::{PgPoolOptions};
 use sqlx::migrate::Migrator;
+use tokio::net::UdpSocket;
+use tokio::runtime::Runtime;
+use crate::domain::{DomainFacade, Domain};
 
 mod cert;
+mod dns;
+mod domain;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
-#[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
-struct Domain { id: String, username: String, password: String }
+fn main() -> Result<(), sqlx::Error> {
+    // use error handling
+    let mut runtime = Runtime::new().unwrap();
 
-struct DomainDOT {
-    id: String,
-    username: String,
-    password: String
-}
-
-impl DomainDOT {
-    fn new() -> Self {
-        let id = uuid::Uuid::new_v4().to_simple().to_string();
-        let username = uuid::Uuid::new_v4().to_simple().to_string();
-        let password = uuid::Uuid::new_v4().to_simple().to_string();
-
-        DomainDOT {
-            id,
-            username,
-            password
-        }
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), sqlx::Error> {
     SimpleLogger::init(LevelFilter::Trace, Config::default()).unwrap();
 
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect("postgresql://postgres:mysecretpassword@localhost/postgres")
-        .await?;
+    let pool: Pool<Postgres> = runtime.block_on(async {
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect("postgresql://postgres:mysecretpassword@localhost/postgres")
+            .await.unwrap();
 
-    MIGRATOR.run(&pool).await.unwrap();
+        MIGRATOR.run(&pool).await.unwrap();
+
+        pool
+    });
+
 
     /*let value = sqlx::query("select 1 + 1")
         .try_map(|row: PgRow| row.try_get::<i32, _>(0))
         .fetch_one(&pool)
         .await.unwrap();*/
 
-    /*let one_hour_ago = chrono::Local::now().naive_local() - Duration::seconds(1);
-    let mut cert: Cert = sqlx::query_as("SELECT * FROM certs LIMIT 1")
-        .fetch_one(&pool).await?;*/
+    /*let hello = warp::path!("hello" / String)
+        .and(warp::any().map(move || domain_facade.clone()));*/
 
 
-    let cert_facade = CertFacade::new(pool.clone());
-    cert_facade.start().await;
+    let domain_facade = DomainFacade::new(pool.clone());
 
-    CertManager::new(cert_facade).test().await;
+    /*runtime.block_on(async {
+        let domain = Domain {
+            id: uuid::Uuid::new_v4().to_simple().to_string(),
+            username: uuid::Uuid::new_v4().to_simple().to_string(),
+            password: bcrypt::hash(uuid::Uuid::new_v4().to_simple().to_string(), bcrypt::DEFAULT_COST).unwrap(),
+            txt: None
+        };
+        domain_facade.create_domain(&domain).await;
+    });*/
 
-    let facade_pool = pool.clone();
-    let domain_facade = DomainFacade::new(facade_pool);
-
-
-    let hello = warp::path!("hello" / String)
-        .and(warp::any().map(move || domain_facade.clone()));
-
+    let mut test = dns::DNS::new(domain_facade);
+    let udp = runtime.block_on(async {
+        UdpSocket::bind("0.0.0.0:3053".to_string()).await.unwrap()
+    });
+    test.run(udp, &runtime);
     /*let serve = warp::serve(hello)
         .run(([127, 0, 0, 1], 3030));*/
+
+    runtime.block_on(async {
+        test.block_until_done().await;
+
+    });
 
     Ok(())
 }
 
-struct DomainFacade<DB: Database> {
-    pool: Pool<DB>
-}
-
-impl <DB: Database> DomainFacade<DB> {
-    fn new(pool: Pool<DB>) -> Self {
-        DomainFacade {
-            pool
-        }
-    }
-}
-
-impl <DB: Database> Clone for DomainFacade<DB> {
-    fn clone(&self) -> Self {
-        let pool = Clone::clone(&self.pool);
-        DomainFacade::new(pool)
-    }
-}
-
-impl DomainFacade<Postgres> {
-    async fn find_by_id(self, id: &str) -> Option<Domain> {
-        sqlx::query_as("SELECT * FROM domain WHERE id = $1 LIMIT 1")
-            .bind(id)
-            .fetch_optional(&self.pool).await.unwrap()
-    }
-}

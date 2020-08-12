@@ -1,4 +1,4 @@
-use sqlx::{Database, FromRow, Pool, Postgres, Transaction, Executor};
+use sqlx::{Database, FromRow, Pool, Postgres, Executor};
 use chrono::naive::NaiveDateTime;
 use chrono::{Duration, Local};
 use acme_lib::{Directory, DirectoryUrl};
@@ -6,10 +6,10 @@ use acme_lib::persist::MemoryPersist;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
-enum State { Ok = 0, Updating = 1 }
+pub enum State { Ok = 0, Updating = 1 }
 
 #[derive(FromRow, Debug)]
-struct Cert {id: String, update: NaiveDateTime, state: State}
+pub struct Cert {id: String, update: NaiveDateTime, state: State}
 
 pub struct CertFacade<DB: Database> {
     pool: Pool<DB>
@@ -102,7 +102,7 @@ impl CertManager<Postgres> {
         let url = DirectoryUrl::LetsEncryptStaging;
         let persist = MemoryPersist::new();
         let dir = Directory::from_url(persist, url).unwrap();
-        let order = tokio::task::spawn_blocking(move || {
+        /*let order = tokio::task::spawn_blocking(move || {
             let account = dir.account("acme-dns-rust@byom.de").unwrap();
             let mut order = account.new_order("ns.wehrli.ml", &[]).unwrap();
             let auths = order.authorizations().unwrap();
@@ -113,7 +113,7 @@ impl CertManager<Postgres> {
             println!("{:?}", proof);
 
             order
-        }).await.unwrap();
+        }).await.unwrap();*/
 
         //self.cert_facade.start().await;
     }

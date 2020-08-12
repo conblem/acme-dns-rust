@@ -16,3 +16,5 @@ warp = "0.2.4"
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
 acme-lib = "0.8.1"
+trust-dns-server = "0.19.5"
+trust-dns-client = "0.19.5"
