@@ -16,24 +16,25 @@ use trust_dns_client::op::LowerQuery;
 use tokio::macros::support::Pin;
 use std::future::Future;
 use std::borrow::Borrow;
-use sqlx::{Database, Postgres};
+use sqlx::{Database, Postgres, Pool};
 
 use crate::domain::{DomainFacade, Domain};
 use std::marker::PhantomData;
 use trust_dns_server::proto::rr::domain::Label;
+use crate::cert::CertFacade;
 
 struct DatabaseAuthority<DB: Database> {
     lower: LowerName,
-    domain_facade: DomainFacade<DB>
+    pool: Pool<DB>
 }
 
 impl <DB: Database> DatabaseAuthority<DB> {
-    fn new(domain_facade: DomainFacade<DB>) -> Self {
+    fn new(pool: Pool<DB>) -> Self {
         let lower = LowerName::from(Name::root());
 
         DatabaseAuthority {
             lower,
-            domain_facade
+            pool
         }
     }
 }
@@ -75,10 +76,27 @@ impl Authority for DatabaseAuthority<Postgres> {
         }
 
         let first= name[0].to_string();
-        let domain_facade = self.domain_facade.clone();
+        let mut pool = self.pool.clone();
+
+        if first == "_acme-challenge" {
+            return Box::pin(async move {
+                let cert = CertFacade::first_cert(&pool).await.expect("always exists");
+                let domain = DomainFacade::find_by_id(&pool, &cert.domain).await.expect("always exists");
+
+                //use match
+                let txt = TXT::new(vec![domain.txt.unwrap()]);
+                let record = Record::from_rdata(
+                    name,
+                    100,
+                    RData::TXT(txt)
+                );
+                let record = Arc::new(RecordSet::from(record));
+                Ok(LookupRecords::new(false, supported_algorithms, record))
+            });
+        }
 
         Box::pin(async move {
-            match domain_facade.find_by_id(&first).await {
+            match DomainFacade::find_by_id(&pool, &first).await {
                 Some(Domain { txt: Some(txt), .. }) => {
                     let txt = TXT::new(vec![txt]);
                     let record = Record::from_rdata(
@@ -109,10 +127,10 @@ pub struct DNS<DB: Database> {
 }
 
 impl DNS<Postgres> {
-    pub fn new(domain_facade: DomainFacade<Postgres>) -> Self {
+    pub fn new(pool: Pool<Postgres>) -> Self {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
-        catalog.upsert(root, Box::new(DatabaseAuthority::new(domain_facade)));
+        catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));
         let server = ServerFuture::new(catalog);
 
         DNS {

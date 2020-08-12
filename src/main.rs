@@ -7,6 +7,7 @@ use sqlx::migrate::Migrator;
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 use crate::domain::{DomainFacade, Domain};
+use crate::cert::CertFacade;
 
 mod cert;
 mod dns;
@@ -27,10 +28,10 @@ fn main() -> Result<(), sqlx::Error> {
             .await.unwrap();
 
         MIGRATOR.run(&pool).await.unwrap();
+        CertFacade::start(&pool).await;
 
         pool
     });
-
 
     /*let value = sqlx::query("select 1 + 1")
         .try_map(|row: PgRow| row.try_get::<i32, _>(0))
@@ -40,8 +41,6 @@ fn main() -> Result<(), sqlx::Error> {
     /*let hello = warp::path!("hello" / String)
         .and(warp::any().map(move || domain_facade.clone()));*/
 
-
-    let domain_facade = DomainFacade::new(pool.clone());
 
     /*runtime.block_on(async {
         let domain = Domain {
@@ -53,7 +52,7 @@ fn main() -> Result<(), sqlx::Error> {
         domain_facade.create_domain(&domain).await;
     });*/
 
-    let mut test = dns::DNS::new(domain_facade);
+    let mut test = dns::DNS::<Postgres>::new(pool);
     let udp = runtime.block_on(async {
         UdpSocket::bind("0.0.0.0:3053".to_string()).await.unwrap()
     });
