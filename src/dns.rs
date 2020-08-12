@@ -20,6 +20,7 @@ use sqlx::{Database, Postgres};
 
 use crate::domain::{DomainFacade, Domain};
 use std::marker::PhantomData;
+use trust_dns_server::proto::rr::domain::Label;
 
 struct DatabaseAuthority<DB: Database> {
     lower: LowerName,
@@ -50,7 +51,7 @@ impl Authority for DatabaseAuthority<Postgres> {
         false
     }
 
-    fn update(&mut self, update: &MessageRequest) -> UpdateResult<bool> {
+    fn update(&mut self, _update: &MessageRequest) -> UpdateResult<bool> {
         Ok(false)
     }
 
@@ -58,31 +59,30 @@ impl Authority for DatabaseAuthority<Postgres> {
         &self.lower
     }
 
-    fn lookup(&self, name: &LowerName, rtype: RecordType, is_secure: bool, supported_algorithms: SupportedAlgorithms) -> Self::LookupFuture {
+    fn lookup(&self, _name: &LowerName, _rtype: RecordType, _is_secure: bool, _supported_algorithms: SupportedAlgorithms) -> Self::LookupFuture {
         Box::pin(async {
-            println!("lookup");
             Ok(LookupRecords::Empty)
         })
     }
 
-    fn search(&self, query: &LowerQuery, is_secure: bool, supported_algorithms: SupportedAlgorithms) -> Self::LookupFuture {
-        if RecordType::TXT != query.query_type() {
+    fn search(&self, query: &LowerQuery, _is_secure: bool, supported_algorithms: SupportedAlgorithms) -> Self::LookupFuture {
+        let name = Name::from(query.name());
+
+        if RecordType::TXT != query.query_type() || name.len() == 0 {
             return Box::pin(async {
                 Ok(LookupRecords::Empty)
             })
         }
 
-        let name = Borrow::<Name>::borrow(query.name()).clone();
+        let first= name[0].to_string();
         let domain_facade = self.domain_facade.clone();
 
         Box::pin(async move {
-            println!("{:?}", &name.to_string());
-            match domain_facade.find_by_id(&name.to_string()).await {
+            match domain_facade.find_by_id(&first).await {
                 Some(Domain { txt: Some(txt), .. }) => {
                     let txt = TXT::new(vec![txt]);
                     let record = Record::from_rdata(
                         name,
-                        //Name::from_str("example.com").unwrap(),
                         100,
                         RData::TXT(txt)
                     );
@@ -96,7 +96,7 @@ impl Authority for DatabaseAuthority<Postgres> {
         })
     }
 
-    fn get_nsec_records(&self, name: &LowerName, is_secure: bool, supported_algorithms: SupportedAlgorithms) -> Self::LookupFuture{
+    fn get_nsec_records(&self, _name: &LowerName, _is_secure: bool, _supported_algorithms: SupportedAlgorithms) -> Self::LookupFuture{
         Box::pin(async {
             Ok(LookupRecords::Empty)
         })
@@ -120,7 +120,9 @@ impl DNS<Postgres> {
             _phantom: PhantomData
         }
     }
+}
 
+impl <DB: Database> DNS<DB> {
     pub fn run(&mut self, udp: UdpSocket, runtime: &Runtime) {
         self.server.register_socket(udp, runtime);
     }
