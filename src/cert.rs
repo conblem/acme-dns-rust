@@ -116,7 +116,6 @@ impl  CertFacade<Postgres> {
             _ => {}
         }
 
-
         transaction.commit().await.unwrap();
     }
 }
@@ -164,6 +163,6 @@ impl CertManager<Postgres> {
             call.validate(5000);
         }).await.unwrap();
 
-        //self.cert_facade.start().await;
+        CertFacade::stop(&self.pool, cert).await;
     }
 }
