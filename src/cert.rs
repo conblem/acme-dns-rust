@@ -3,22 +3,32 @@ use chrono::naive::NaiveDateTime;
 use chrono::{Duration, Local};
 use acme_lib::{Directory, DirectoryUrl};
 use acme_lib::persist::MemoryPersist;
+use crate::domain::{Domain, DomainFacade};
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
 pub enum State { Ok = 0, Updating = 1 }
 
 #[derive(FromRow, Debug)]
-pub struct Cert {id: String, update: NaiveDateTime, state: State}
+pub struct Cert {
+    id: String,
+    update: NaiveDateTime,
+    state: State,
+    #[sqlx(rename = "domain_id")]
+    domain: String
+}
 
 pub struct CertFacade<DB: Database> {
-    pool: Pool<DB>
+    pool: Pool<DB>,
+    domain_facade: DomainFacade<DB>
 }
 
 impl <DB: Database> CertFacade<DB> {
     pub fn new(pool: Pool<DB>) -> Self {
+        let domain_facade = DomainFacade::new(pool.clone());
         CertFacade {
-            pool
+            pool,
+            domain_facade
         }
     }
 }
@@ -33,9 +43,10 @@ impl CertFacade<Postgres> {
     }
 
     async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
-        sqlx::query("UPDATE cert SET update = $1, state = $2 WHERE id = $3")
+        sqlx::query("UPDATE cert SET update = $1, state = $2, domain_id = $3 WHERE id = $4")
             .bind(&cert.update)
             .bind(&cert.state)
+            .bind(&cert.domain)
             .bind(&cert.id)
             .execute(executor)
             .await
@@ -43,10 +54,11 @@ impl CertFacade<Postgres> {
     }
 
     async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
-        sqlx::query("INSERT INTO cert (id, update, state) VALUES ($1, $2, $3)")
+        sqlx::query("INSERT INTO cert (id, update, state, domain_id) VALUES ($1, $2, $3, $4)")
             .bind(&cert.id)
             .bind(&cert.update)
             .bind(&cert.state)
+            .bind(&cert.domain)
             .execute(executor)
             .await
             .unwrap();
@@ -76,7 +88,8 @@ impl CertFacade<Postgres> {
                 let cert = Cert {
                     id: uuid::Uuid::new_v4().to_simple().to_string(),
                     update: chrono::Local::now().naive_local(),
-                    state: State::Ok
+                    state: State::Ok,
+                    domain: uuid::Uuid::new_v4().to_simple().to_string()
                 };
 
                 CertFacade::create_cert(&mut transaction, &cert).await;
