@@ -72,6 +72,7 @@ impl  CertFacade<Postgres> {
 
         let cert = CertFacade::first_cert(&mut transaction).await;
 
+
         let cert = match cert {
             Some(mut cert) if cert.state == State::Ok => {
                 cert.state = State::Updating;
@@ -79,6 +80,7 @@ impl  CertFacade<Postgres> {
                 Some(cert)
             },
             Some(mut cert) => {
+                let test = cert.state == State::Ok;
                 let one_hour_ago = Local::now().naive_local() - Duration::hours(1);
                 if cert.update < one_hour_ago {
                     cert.update = Local::now().naive_local();
@@ -139,9 +141,15 @@ impl CertManager<Postgres> {
             None => return
         };
 
-        let mut domain = DomainFacade::find_by_id(&self.pool, &cert.id)
+        println!("cert cert");
+        println!("{:?}", cert);
+
+        let mut domain = DomainFacade::find_by_id(&self.pool, &cert.domain)
             .await
             .expect("must have in sql");
+
+        println!("{:?}", domain);
+
 
         let url = DirectoryUrl::LetsEncryptStaging;
         let persist = MemoryPersist::new();

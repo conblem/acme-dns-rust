@@ -7,7 +7,7 @@ use sqlx::migrate::Migrator;
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 use crate::domain::{DomainFacade, Domain};
-use crate::cert::{CertFacade, CertManager};
+use crate::cert::{CertFacade, CertManager, State};
 
 mod cert;
 mod dns;
@@ -28,7 +28,6 @@ fn main() -> Result<(), sqlx::Error> {
             .await.unwrap();
 
         MIGRATOR.run(&pool).await.unwrap();
-        CertFacade::start(&pool).await;
 
         pool
     });
@@ -54,7 +53,7 @@ fn main() -> Result<(), sqlx::Error> {
 
     let mut test = dns::DNS::<Postgres>::new(pool.clone());
     let udp = runtime.block_on(async {
-        UdpSocket::bind("0.0.0.0:53".to_string()).await.unwrap()
+        UdpSocket::bind("0.0.0.0:3053".to_string()).await.unwrap()
     });
     test.run(udp, &runtime);
 
@@ -63,8 +62,8 @@ fn main() -> Result<(), sqlx::Error> {
             test.block_until_done().await;
         });
 
-        //let cert_manager = CertManager::new(pool);
-        //cert_manager.test().await;
+        let cert_manager = CertManager::new(pool);
+        cert_manager.test().await;
         server.await;
     });
 
