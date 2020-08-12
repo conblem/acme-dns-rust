@@ -1,7 +1,7 @@
 use sqlx::{Database, FromRow, Pool, Postgres, Executor, MySql};
 use chrono::naive::NaiveDateTime;
 use chrono::{Duration, Local, DateTime};
-use acme_lib::{Directory, DirectoryUrl};
+use acme_lib::{Directory, DirectoryUrl, create_p384_key};
 use acme_lib::persist::MemoryPersist;
 use crate::domain::{Domain, DomainFacade};
 use std::marker::PhantomData;
@@ -171,6 +171,9 @@ impl CertManager<Postgres> {
             call.validate(5000);
             order.refresh().unwrap()
         }).await.unwrap();
+
+        let private = create_p384_key();
+        private.private_key_to_der();
 
         CertFacade::stop(&self.pool, cert).await;
     }

@@ -7,10 +7,14 @@ dependencies = [
  "acme-lib",
  "bcrypt",
  "chrono",
+ "futures-util",
+ "parking_lot",
+ "rustls",
  "serde",
  "simplelog",
  "sqlx",
  "tokio",
+ "tokio-rustls",
  "trust-dns-client",
  "trust-dns-server",
  "uuid",
@@ -2348,6 +2352,18 @@ checksum = "cd608593a919a8e05a7d1fc6df885e40f6a88d3a70a3a7eff23ff27964eda069"
 dependencies = [
  "native-tls",
  "tokio",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15cb62a0d2770787abc96e99c1cd98fcf17f94959f3af63ca85bdfb203f051b4"
+dependencies = [
+ "futures-core",
+ "rustls",
+ "tokio",
+ "webpki",
 ]
 
 [[package]]

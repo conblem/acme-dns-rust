@@ -12,6 +12,7 @@ use crate::cert::{CertFacade, CertManager, State};
 mod cert;
 mod dns;
 mod domain;
+mod http;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
@@ -63,7 +64,8 @@ fn main() -> Result<(), sqlx::Error> {
         });
 
         let cert_manager = CertManager::new(pool);
-        cert_manager.test().await;
+        //cert_manager.test().await;
+        crate::http::test().await;
         server.await;
     });
 
