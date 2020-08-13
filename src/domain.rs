@@ -1,4 +1,4 @@
-use sqlx::{Pool, Database, Postgres, FromRow, Executor};
+use sqlx::{Database, Postgres, Executor};
 use serde::{Deserialize, Serialize};
 use serde::export::PhantomData;
 use uuid::Uuid;

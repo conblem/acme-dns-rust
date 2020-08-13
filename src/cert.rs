@@ -1,11 +1,10 @@
-use sqlx::{Database, FromRow, Pool, Postgres, Executor, MySql};
+use sqlx::{Database, FromRow, Pool, Postgres, Executor};
 use chrono::naive::NaiveDateTime;
-use chrono::{Duration, Local, DateTime};
+use chrono::{Duration, Local};
 use acme_lib::{Directory, DirectoryUrl, create_p384_key};
 use acme_lib::persist::MemoryPersist;
 use crate::domain::{Domain, DomainFacade};
 use std::marker::PhantomData;
-use std::borrow::Borrow;
 use uuid::Uuid;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
@@ -80,7 +79,6 @@ impl  CertFacade<Postgres> {
                 Some(cert)
             },
             Some(mut cert) => {
-                let test = cert.state == State::Ok;
                 let one_hour_ago = Local::now().naive_local() - Duration::hours(1);
                 if cert.update < one_hour_ago {
                     cert.update = Local::now().naive_local();

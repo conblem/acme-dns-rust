@@ -1,26 +1,20 @@
-use trust_dns_server::authority::{Catalog, ZoneType, Authority, MessageRequest, LookupError, UpdateResult, LookupObject, LookupRecords};
+use trust_dns_server::authority::{Catalog, ZoneType, Authority, MessageRequest, LookupError, UpdateResult, LookupRecords};
 use std::sync::Arc;
 use trust_dns_server::ServerFuture;
-use trust_dns_server::server::{RequestHandler, ResponseHandler, Request};
-use std::ops::Deref;
-use std::str::FromStr;
 use trust_dns_client::rr::{Name, LowerName};
-use trust_dns_server::store::in_memory::InMemoryAuthority;
-use tokio::net::UdpSocket;
+use tokio::net::{UdpSocket, ToSocketAddrs};
 use tokio::runtime::Runtime;
-use trust_dns_server::proto::rr::{Record, RecordType, RecordSet, IntoName};
+use trust_dns_server::proto::rr::{Record, RecordType, RecordSet};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_client::op::LowerQuery;
 use tokio::macros::support::Pin;
 use std::future::Future;
-use std::borrow::Borrow;
 use sqlx::{Database, Postgres, Pool};
 
 use crate::domain::{DomainFacade, Domain};
 use std::marker::PhantomData;
-use trust_dns_server::proto::rr::domain::Label;
 use crate::cert::CertFacade;
 
 struct DatabaseAuthority<DB: Database> {
@@ -76,7 +70,7 @@ impl Authority for DatabaseAuthority<Postgres> {
         }
 
         let first= name[0].to_string();
-        let mut pool = self.pool.clone();
+        let pool = self.pool.clone();
 
         if first == "_acme-challenge" {
             return Box::pin(async move {
@@ -123,30 +117,55 @@ impl Authority for DatabaseAuthority<Postgres> {
 
 pub struct DNS<DB: Database> {
     server: ServerFuture<Catalog>,
-    _phantom: PhantomData<DB>
+    _phantom: PhantomData<DB>,
+    udp: Option<UdpSocket>
 }
 
 impl DNS<Postgres> {
-    pub fn new(pool: Pool<Postgres>) -> Self {
+    pub async fn new<A: ToSocketAddrs>(pool: Pool<Postgres>, addr: A) -> Self {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
         catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));
         let server = ServerFuture::new(catalog);
 
+        let udp = UdpSocket::bind(addr).await.unwrap();
+
         DNS {
             server,
-            _phantom: PhantomData
+            _phantom: PhantomData,
+            udp: Some(udp)
         }
     }
 }
 
 impl <DB: Database> DNS<DB> {
-    pub fn run(&mut self, udp: UdpSocket, runtime: &Runtime) {
-        self.server.register_socket(udp, runtime);
+    pub fn register_socket(mut self, runtime: &Runtime) -> Self {
+        self.server.register_socket(self.udp.take().expect("only call this function once"), runtime);
+
+        self
     }
 
-    pub async fn block_until_done(self) {
+    pub async fn run(self) {
         self.server.block_until_done().await.unwrap();
     }
+}
+
+struct DNSBuilder<DB: Database>(PhantomData<DB>);
+
+struct DNSBuilder<DB: Database> {
+    server: ServerFuture<Catalog>,
+    _phantom: PhantomData<DB>,
+}
+
+impl <DB: Database> DNSBuilder<DB> {
+    pub async fn new<A: ToSocketAddrs>(pool: Pool<Postgres>, addr: A) -> Self {
+        let udp = UdpSocket::bind(addr).await.unwrap()
+
+        DNSBuilder {
+
+
+        }
+    }
+
 }
 
