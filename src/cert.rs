@@ -3,9 +3,12 @@ use chrono::naive::NaiveDateTime;
 use chrono::{Duration, Local};
 use acme_lib::{Directory, DirectoryUrl, create_p384_key};
 use acme_lib::persist::MemoryPersist;
-use crate::domain::{Domain, DomainFacade};
 use std::marker::PhantomData;
 use uuid::Uuid;
+use tokio::time::Interval;
+
+use crate::domain::{Domain, DomainFacade};
+use crate::http::Http;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
@@ -71,7 +74,6 @@ impl  CertFacade<Postgres> {
 
         let cert = CertFacade::first_cert(&mut transaction).await;
 
-
         let cert = match cert {
             Some(mut cert) if cert.state == State::Ok => {
                 cert.state = State::Updating;
@@ -121,28 +123,43 @@ impl  CertFacade<Postgres> {
 }
 
 pub struct CertManager<DB: Database> {
-    pool: Pool<DB>
+    pool: Pool<DB>,
+    http: Http
 }
 
 impl <DB: Database> CertManager<DB> {
-    pub fn new(pool: Pool<DB>) -> Self {
+    pub fn new(pool: Pool<DB>, http: Http) -> Self {
         CertManager {
-            pool
+            pool,
+            http
         }
+    }
+
+    fn interval() -> Interval {
+        let duration = Duration::hours(1).to_std().unwrap();
+        tokio::time::interval(duration)
     }
 }
 
 impl CertManager<Postgres> {
-    pub async fn test(&self) {
-        let cert = match CertFacade::start(&self.pool).await {
+    pub async fn job(self) {
+        let mut interval = CertManager::<Postgres>::interval();
+        loop {
+            interval.tick().await;
+            //self.test().await;
+        }
+    }
+
+    async fn test(&self) {
+        let memory_cert = match CertFacade::start(&self.pool).await {
             Some(cert) => cert,
             None => return
         };
 
         println!("cert cert");
-        println!("{:?}", cert);
+        println!("{:?}", memory_cert);
 
-        let mut domain = DomainFacade::find_by_id(&self.pool, &cert.domain)
+        let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await
             .expect("must have in sql");
 
@@ -165,14 +182,21 @@ impl CertManager<Postgres> {
         DomainFacade::update_domain(&self.pool, &domain).await;
 
         //error handling
-        let ord_csr = tokio::task::spawn_blocking(move || {
+        let cert = tokio::task::spawn_blocking(move || {
             call.validate(5000);
-            order.refresh().unwrap()
+            order.refresh().unwrap();
+            let ord_csr = order.confirm_validations().unwrap();
+            let private = create_p384_key();
+            let ord_crt = ord_csr.finalize_pkey(private, 5000).unwrap();
+            ord_crt.download_and_save_cert().unwrap()
         }).await.unwrap();
 
-        let private = create_p384_key();
-        private.private_key_to_der();
+        let mut private = cert.private_key_der();
+        let mut cert = cert.certificate_der();
 
-        CertFacade::stop(&self.pool, cert).await;
+        self.http.set_config(&mut private, &mut cert);
+
+        CertFacade::stop(&self.pool, memory_cert).await;
+
     }
 }

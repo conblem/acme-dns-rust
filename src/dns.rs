@@ -16,21 +16,11 @@ use sqlx::{Database, Postgres, Pool};
 use crate::domain::{DomainFacade, Domain};
 use std::marker::PhantomData;
 use crate::cert::CertFacade;
+use trust_dns_server::proto::error::ProtoError;
 
 struct DatabaseAuthority<DB: Database> {
     lower: LowerName,
     pool: Pool<DB>
-}
-
-impl <DB: Database> DatabaseAuthority<DB> {
-    fn new(pool: Pool<DB>) -> Self {
-        let lower = LowerName::from(Name::root());
-
-        DatabaseAuthority {
-            lower,
-            pool
-        }
-    }
 }
 
 #[allow(dead_code)]
@@ -115,57 +105,49 @@ impl Authority for DatabaseAuthority<Postgres> {
     }
 }
 
-pub struct DNS<DB: Database> {
-    server: ServerFuture<Catalog>,
-    _phantom: PhantomData<DB>,
-    udp: Option<UdpSocket>
+impl <DB: Database> DatabaseAuthority<DB> {
+    fn new(pool: Pool<DB>) -> Self {
+        let lower = LowerName::from(Name::root());
+
+        DatabaseAuthority {
+            lower,
+            pool
+        }
+    }
 }
 
-impl DNS<Postgres> {
-    pub async fn new<A: ToSocketAddrs>(pool: Pool<Postgres>, addr: A) -> Self {
+
+pub struct DNS {
+    server: ServerFuture<Catalog>,
+}
+
+impl DNS {
+    pub async fn builder<DB: Database, A: ToSocketAddrs>(addr: A) -> tokio::io::Result<DNSBuilder<DB>> {
+        let udp = UdpSocket::bind(addr).await?;
+
+        Ok(DNSBuilder(udp, PhantomData))
+    }
+
+    pub async fn run(self) -> Result<(), ProtoError> {
+        self.server.block_until_done().await?;
+
+        Ok(())
+    }
+}
+
+pub struct DNSBuilder<DB: Database>(UdpSocket, PhantomData<DB>);
+
+impl DNSBuilder<Postgres> {
+    pub fn build(self, pool: Pool<Postgres>, runtime: &Runtime) -> DNS {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
         catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));
-        let server = ServerFuture::new(catalog);
-
-        let udp = UdpSocket::bind(addr).await.unwrap();
+        let mut server = ServerFuture::new(catalog);
+        server.register_socket(self.0, runtime);
 
         DNS {
-            server,
-            _phantom: PhantomData,
-            udp: Some(udp)
+            server
         }
     }
-}
-
-impl <DB: Database> DNS<DB> {
-    pub fn register_socket(mut self, runtime: &Runtime) -> Self {
-        self.server.register_socket(self.udp.take().expect("only call this function once"), runtime);
-
-        self
-    }
-
-    pub async fn run(self) {
-        self.server.block_until_done().await.unwrap();
-    }
-}
-
-struct DNSBuilder<DB: Database>(PhantomData<DB>);
-
-struct DNSBuilder<DB: Database> {
-    server: ServerFuture<Catalog>,
-    _phantom: PhantomData<DB>,
-}
-
-impl <DB: Database> DNSBuilder<DB> {
-    pub async fn new<A: ToSocketAddrs>(pool: Pool<Postgres>, addr: A) -> Self {
-        let udp = UdpSocket::bind(addr).await.unwrap()
-
-        DNSBuilder {
-
-
-        }
-    }
-
 }
 

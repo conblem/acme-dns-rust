@@ -1,35 +1,63 @@
 use warp::{Filter, serve};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, ToSocketAddrs};
 use std::sync::Arc;
+use std::io::Cursor;
 use parking_lot::RwLock;
 use tokio_rustls::TlsAcceptor;
-use rustls::{ServerConfig, NoClientAuth};
+use rustls::{ServerConfig, NoClientAuth, ResolvesServerCertUsingSNI};
 use futures_util::{StreamExt, TryStreamExt};
+use rustls::internal::pemfile::{pkcs8_private_keys, certs};
+use rustls::sign::{RSASigningKey, CertifiedKey, SigningKey};
 
 pub struct Http {
-    acceptor: Arc<RwLock<TlsAcceptor>>
+    acceptor: Arc<RwLock<TlsAcceptor>>,
+    http: Option<TcpListener>,
+    https: Option<TcpListener>
 }
 
 impl Http {
-    pub fn new() -> Self {
+    pub async fn new<A: ToSocketAddrs>(http: Option<A>, https: Option<A>) -> tokio::io::Result<Self> {
         let config = Arc::new(ServerConfig::new(NoClientAuth::new()));
         let acceptor = Arc::new(RwLock::new(TlsAcceptor::from(config)));
+        let http = match http {
+            Some(http) => Some(TcpListener::bind(http).await?),
+            None => None
+        };
+        let https = match https {
+            Some(https) => Some(TcpListener::bind(https).await?),
+            None => None
+        };
 
-        Http {
-            acceptor
-        }
+        Ok(Http {
+            acceptor,
+            http,
+            https
+        })
     }
 
-    pub fn set_config(&self, config: ServerConfig) {
-        let config = Arc::new(config);
-        let acceptor = TlsAcceptor::from(config);
+    pub fn set_config(&self, private: &mut Vec<u8>, cert: &mut Vec<u8>) {
+        let mut private = Cursor::new(private);
+        let privates = pkcs8_private_keys(&mut private).unwrap();
+        let private = privates.get(0).unwrap();
+        let private: Arc<Box<dyn SigningKey>> = Arc::new(Box::new(RSASigningKey::new(private).unwrap()));
+
+        let mut cert = Cursor::new(cert);
+        let cert = certs(&mut cert).unwrap();
+
+        let certified_key = CertifiedKey::new(cert, private);
+        let mut sni = ResolvesServerCertUsingSNI::new();
+        sni.add("acme.wehrli.ml", certified_key).unwrap();
+
+        let mut config = ServerConfig::new(Arc::new(NoClientAuth));
+        config.cert_resolver = Arc::new(sni);
+
+        let acceptor = TlsAcceptor::from(Arc::new(config));
 
         *self.acceptor.write() = acceptor;
     }
 
     pub async fn run(self) {
-        let https = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-        let https = Box::leak(Box::new(https));
+        let https = Box::leak(Box::new(self.https.unwrap()));
 
         let acceptor_stream = futures_util::stream::repeat(Arc::clone(&self.acceptor));
         let stream = https
@@ -51,7 +79,7 @@ impl Http {
             https_server.await
         });
 
-        let http_server = serve(test).run(([127, 0, 0, 1], 8081));
+        let http_server = serve(test).serve_incoming(self.http.unwrap());
         let http_spawn = tokio::spawn(async move {
             http_server.await
         });
@@ -62,8 +90,11 @@ impl Http {
 
 impl Clone for Http {
     fn clone(&self) -> Self {
+        let acceptor = Arc::clone(&self.acceptor);
         Http {
-            acceptor: Arc::clone(&self.acceptor)
+            acceptor,
+            http: None,
+            https: None
         }
     }
 }
