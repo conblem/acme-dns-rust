@@ -23,7 +23,7 @@ create table cert
 	id char(32) not null
 		constraint cert_pk
 			primary key,
-	update timestamp not null,
+	update bigint not null,
 	state integer not null,
 	domain_id char(32) not null
 		constraint domain
