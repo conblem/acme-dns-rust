@@ -1,9 +1,8 @@
-use sqlx::{Database, FromRow, Pool, Postgres, Executor, Any, AnyPool};
+use sqlx::{FromRow, Executor, Any, AnyPool};
 use chrono::naive::NaiveDateTime;
 use chrono::{Duration, Local, DateTime, Utc};
 use acme_lib::{Directory, DirectoryUrl, create_p384_key};
 use acme_lib::persist::MemoryPersist;
-use std::marker::PhantomData;
 use uuid::Uuid;
 use tokio::time::Interval;
 

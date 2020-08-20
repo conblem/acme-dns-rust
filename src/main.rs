@@ -1,6 +1,5 @@
 use simplelog::{LevelFilter, Config, SimpleLogger};
-use sqlx::{Pool, Postgres, AnyPool};
-use sqlx::postgres::{PgPoolOptions};
+use sqlx::{AnyPool};
 use sqlx::migrate::Migrator;
 use tokio::runtime::Runtime;
 use std::error::Error;
@@ -10,7 +9,6 @@ use crate::dns::DNS;
 use crate::cert::CertManager;
 use sqlx::any::{AnyPoolOptions, AnyConnectOptions, AnyKind};
 use std::str::FromStr;
-use crate::domain::DomainFacade;
 
 mod cert;
 mod dns;
@@ -25,9 +23,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     SimpleLogger::init(LevelFilter::Trace, Config::default())?;
 
     let (pool, kind) = runtime.block_on(setup_database())?;
-
-    let domain_facade = DomainFacade::new();
-    let cert_facade = CertFacade::new();
 
     let dns = runtime.block_on(
         DNS::builder("0.0.0.0:3053".to_string())

@@ -11,21 +11,19 @@ use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_client::op::LowerQuery;
 use tokio::macros::support::Pin;
 use std::future::Future;
-use sqlx::{Database, Postgres, Pool};
+use sqlx::AnyPool;
 
 use crate::domain::{DomainFacade, Domain};
-use std::marker::PhantomData;
 use crate::cert::CertFacade;
 use trust_dns_server::proto::error::ProtoError;
 
-struct DatabaseAuthority<'a> {
+struct DatabaseAuthority {
     lower: LowerName,
-    domain_facade: &'a DomainFacade,
-    cert_facade: &'a CertFacade
+    pool: AnyPool
 }
 
 #[allow(dead_code)]
-impl Authority for DatabaseAuthority<'_> {
+impl Authority for DatabaseAuthority {
     type Lookup = LookupRecords;
     type LookupFuture = Pin<Box<dyn Future<Output = Result<Self::Lookup, LookupError>> + Send>>;
 
@@ -106,14 +104,13 @@ impl Authority for DatabaseAuthority<'_> {
     }
 }
 
-impl <'a> DatabaseAuthority<'a> {
-    fn new(domain_facade: &'a DomainFacade, cert_facade: &'a CertFacade) -> Self {
+impl DatabaseAuthority {
+    fn new(pool: AnyPool) -> Self {
         let lower = LowerName::from(Name::root());
 
         DatabaseAuthority {
             lower,
-            domain_facade,
-            cert_facade
+            pool
         }
     }
 }
@@ -140,10 +137,10 @@ impl DNS {
 pub struct DNSBuilder(UdpSocket);
 
 impl DNSBuilder {
-    pub fn build(self, domain_facade: &DomainFacade, cert_facade: &CertFacade, runtime: &Runtime) -> DNS {
+    pub fn build(self, pool: AnyPool, runtime: &Runtime) -> DNS {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
-        catalog.upsert(root, Box::new(DatabaseAuthority::new(domain_facade, cert_facade)));
+        catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));
         let mut server = ServerFuture::new(catalog);
         server.register_socket(self.0, runtime);
 

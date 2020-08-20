@@ -1,8 +1,6 @@
-use sqlx::{Database, Postgres, Executor, Any};
+use sqlx::{Executor, Any};
 use serde::{Deserialize, Serialize};
-use serde::export::PhantomData;
 use uuid::Uuid;
-use sqlx::any::AnyKind;
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
 pub struct Domain {

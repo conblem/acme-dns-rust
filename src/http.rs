@@ -57,7 +57,7 @@ impl Http {
     }
 
     pub async fn run(self) {
-        let https = Box::leak(Box::new(self.https.unwrap()));
+        let mut https = self.https.unwrap();
 
         let acceptor_stream = futures_util::stream::repeat(Arc::clone(&self.acceptor));
         let stream = https
@@ -74,7 +74,7 @@ impl Http {
                 "test".to_string()
             });
 
-        let https_server = serve(test).serve_incoming(stream);
+        let https_server = serve(test).run_incoming(https);
         let https_spawn = tokio::spawn(async move {
             https_server.await
         });
