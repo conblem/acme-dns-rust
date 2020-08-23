@@ -1,6 +1,5 @@
 use simplelog::{LevelFilter, Config, SimpleLogger};
-use sqlx::{Pool, Postgres};
-use sqlx::postgres::{PgPoolOptions};
+use sqlx::{AnyPool};
 use sqlx::migrate::Migrator;
 use tokio::runtime::Runtime;
 use std::error::Error;
@@ -8,6 +7,8 @@ use std::error::Error;
 use crate::http::Http;
 use crate::dns::DNS;
 use crate::cert::CertManager;
+use sqlx::any::{AnyPoolOptions, AnyConnectOptions, AnyKind};
+use std::str::FromStr;
 
 mod cert;
 mod dns;
@@ -20,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut runtime = Runtime::new()?;
     SimpleLogger::init(LevelFilter::Trace, Config::default())?;
 
-    let pool = runtime.block_on(setup_database())?;
+    let (pool, kind) = runtime.block_on(setup_database())?;
 
     let dns = runtime.block_on(
         DNS::builder("0.0.0.0:3053".to_string())
@@ -49,14 +50,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 
-async fn setup_database() -> Result<Pool<Postgres>, sqlx::Error> {
-    let pool = PgPoolOptions::new()
+async fn setup_database() -> Result<(AnyPool, AnyKind), sqlx::Error> {
+    let options = AnyConnectOptions::from_str("postgresql://postgres:mysecretpassword@localhost/postgres")?;
+    let kind = options.kind();
+    let pool = AnyPoolOptions::new()
         .max_connections(5)
-        .connect("postgresql://postgres:mysecretpassword@localhost/postgres")
+        .connect_with(options)
         .await?;
 
     MIGRATOR.run(&pool).await?;
 
-    Ok(pool)
+    Ok((pool, kind))
 }
 

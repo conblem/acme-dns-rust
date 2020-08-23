@@ -11,20 +11,19 @@ use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_client::op::LowerQuery;
 use tokio::macros::support::Pin;
 use std::future::Future;
-use sqlx::{Database, Postgres, Pool};
+use sqlx::AnyPool;
 
 use crate::domain::{DomainFacade, Domain};
-use std::marker::PhantomData;
 use crate::cert::CertFacade;
 use trust_dns_server::proto::error::ProtoError;
 
-struct DatabaseAuthority<DB: Database> {
+struct DatabaseAuthority {
     lower: LowerName,
-    pool: Pool<DB>
+    pool: AnyPool
 }
 
 #[allow(dead_code)]
-impl Authority for DatabaseAuthority<Postgres> {
+impl Authority for DatabaseAuthority {
     type Lookup = LookupRecords;
     type LookupFuture = Pin<Box<dyn Future<Output = Result<Self::Lookup, LookupError>> + Send>>;
 
@@ -105,8 +104,8 @@ impl Authority for DatabaseAuthority<Postgres> {
     }
 }
 
-impl <DB: Database> DatabaseAuthority<DB> {
-    fn new(pool: Pool<DB>) -> Self {
+impl DatabaseAuthority {
+    fn new(pool: AnyPool) -> Self {
         let lower = LowerName::from(Name::root());
 
         DatabaseAuthority {
@@ -122,10 +121,10 @@ pub struct DNS {
 }
 
 impl DNS {
-    pub async fn builder<DB: Database, A: ToSocketAddrs>(addr: A) -> tokio::io::Result<DNSBuilder<DB>> {
+    pub async fn builder<A: ToSocketAddrs>(addr: A) -> tokio::io::Result<DNSBuilder> {
         let udp = UdpSocket::bind(addr).await?;
 
-        Ok(DNSBuilder(udp, PhantomData))
+        Ok(DNSBuilder(udp))
     }
 
     pub async fn run(self) -> Result<(), ProtoError> {
@@ -135,10 +134,10 @@ impl DNS {
     }
 }
 
-pub struct DNSBuilder<DB: Database>(UdpSocket, PhantomData<DB>);
+pub struct DNSBuilder(UdpSocket);
 
-impl DNSBuilder<Postgres> {
-    pub fn build(self, pool: Pool<Postgres>, runtime: &Runtime) -> DNS {
+impl DNSBuilder {
+    pub fn build(self, pool: AnyPool, runtime: &Runtime) -> DNS {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
         catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));

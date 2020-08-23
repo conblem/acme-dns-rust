@@ -1,9 +1,8 @@
-use sqlx::{Database, FromRow, Pool, Postgres, Executor};
+use sqlx::{FromRow, Executor, Any, AnyPool};
 use chrono::naive::NaiveDateTime;
-use chrono::{Duration, Local};
+use chrono::{Duration, Local, DateTime, Utc};
 use acme_lib::{Directory, DirectoryUrl, create_p384_key};
 use acme_lib::persist::MemoryPersist;
-use std::marker::PhantomData;
 use uuid::Uuid;
 use tokio::time::Interval;
 
@@ -17,7 +16,7 @@ pub enum State { Ok = 0, Updating = 1 }
 #[derive(FromRow, Debug)]
 pub struct Cert {
     id: String,
-    update: NaiveDateTime,
+    update: i64,
     state: State,
     #[sqlx(rename = "domain_id")]
     pub domain: String
@@ -27,27 +26,26 @@ impl Cert {
     fn new(domain: &Domain) -> Self {
         Cert {
             id: Uuid::new_v4().to_simple().to_string(),
-            update: Local::now().naive_local(),
+            update: Local::now().timestamp(),
             state: State::Updating,
             domain: domain.id.clone()
         }
     }
 }
 
-pub struct CertFacade<DB: Database> {
-    _phantom: PhantomData<DB>
+pub struct CertFacade {
 }
 
 
-impl  CertFacade<Postgres> {
-    pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E) -> Option<Cert> {
+impl  CertFacade {
+    pub async fn first_cert<'a, E: Executor<'a, Database = Any>>(executor: E) -> Option<Cert> {
         sqlx::query_as("SELECT * FROM cert LIMIT 1")
             .fetch_optional(executor)
             .await
             .unwrap()
     }
 
-    async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
+    async fn update_cert<'a, E: Executor<'a, Database = Any>>(executor: E, cert: &Cert) {
         sqlx::query("UPDATE cert SET update = $1, state = $2, domain_id = $3 WHERE id = $4")
             .bind(&cert.update)
             .bind(&cert.state)
@@ -58,7 +56,7 @@ impl  CertFacade<Postgres> {
             .unwrap();
     }
 
-    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
+    async fn create_cert<'a, E: Executor<'a, Database = Any>>(executor: E, cert: &Cert) {
         sqlx::query("INSERT INTO cert (id, update, state, domain_id) VALUES ($1, $2, $3, $4)")
             .bind(&cert.id)
             .bind(&cert.update)
@@ -69,7 +67,7 @@ impl  CertFacade<Postgres> {
             .unwrap();
     }
 
-    pub async fn start(pool: &Pool<Postgres>) -> Option<Cert> {
+    pub async fn start(pool: &AnyPool) -> Option<Cert> {
         let mut transaction = pool.begin().await.unwrap();
 
         let cert = CertFacade::first_cert(&mut transaction).await;
@@ -81,9 +79,10 @@ impl  CertFacade<Postgres> {
                 Some(cert)
             },
             Some(mut cert) => {
-                let one_hour_ago = Local::now().naive_local() - Duration::hours(1);
-                if cert.update < one_hour_ago {
-                    cert.update = Local::now().naive_local();
+                let one_hour_ago = Local::now() - Duration::hours(1);
+                let update = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(cert.update, 0), Utc);
+                if update < one_hour_ago {
+                    cert.update = Local::now().timestamp_millis();
                     cert.state = State::Updating;
                     CertFacade::update_cert(&mut transaction, &cert).await;
                     Some(cert)
@@ -107,7 +106,7 @@ impl  CertFacade<Postgres> {
         cert
     }
 
-    pub async fn stop(pool: &Pool<Postgres>, mut memory_cert: Cert) {
+    pub async fn stop(pool: &AnyPool, mut memory_cert: Cert) {
         let mut transaction = pool.begin().await.unwrap();
 
         match CertFacade::first_cert(&mut transaction).await {
@@ -122,13 +121,13 @@ impl  CertFacade<Postgres> {
     }
 }
 
-pub struct CertManager<DB: Database> {
-    pool: Pool<DB>,
+pub struct CertManager {
+    pool: AnyPool,
     http: Http
 }
 
-impl <DB: Database> CertManager<DB> {
-    pub fn new(pool: Pool<DB>, http: Http) -> Self {
+impl CertManager {
+    pub fn new(pool: AnyPool, http: Http) -> Self {
         CertManager {
             pool,
             http
@@ -141,9 +140,9 @@ impl <DB: Database> CertManager<DB> {
     }
 }
 
-impl CertManager<Postgres> {
+impl CertManager {
     pub async fn job(self) {
-        let mut interval = CertManager::<Postgres>::interval();
+        let mut interval = CertManager::interval();
         loop {
             interval.tick().await;
             //self.test().await;

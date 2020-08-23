@@ -57,7 +57,7 @@ impl Http {
         *self.acceptor.write() = acceptor;
     }
 
-    pub async fn run(self) -> Result<(), impl Error> {
+    pub async fn run(mut self) -> Result<(), impl Error> {
         let test = warp::path("hello")
             .and(warp::path::param())
             .map(|map: String| {
@@ -65,11 +65,10 @@ impl Http {
             });
 
         let acceptor = Arc::clone(&self.acceptor);
-        let https = self.https.map(move |https| {
-            let https = Box::leak(Box::new(https));
-
-            let test = futures_util::stream::unfold(acceptor)
-            let acceptor_stream = futures_util::stream::repeat(acceptor);
+        let acceptor_stream = futures_util::stream::unfold(acceptor, |acc| async move {
+            Some((Arc::clone(&acc), acc))
+        });
+        let https = if let Some(ref mut https) = self.https {
             let stream = https
                 .incoming()
                 .zip(acceptor_stream)
@@ -78,10 +77,12 @@ impl Http {
                     acceptor.read().accept(stream.unwrap())
                 });
 
-            serve(test).serve_incoming(stream)
-        });
+            Some(serve(test).run_incoming(stream))
+        } else {
+            None
+        };
 
-        let http = self.http.map(|http| serve(test).serve_incoming(http));
+        let http = self.http.map(|http| serve(test).run_incoming(http));
 
         match (https, http) {
             (Some(https), Some(http)) =>
