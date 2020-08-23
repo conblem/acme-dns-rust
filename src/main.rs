@@ -17,7 +17,6 @@ mod http;
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // use error handling
     let mut runtime = Runtime::new()?;
     SimpleLogger::init(LevelFilter::Trace, Config::default())?;
 
@@ -35,14 +34,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cert_manager = CertManager::new(pool, http.clone());
     runtime.spawn(cert_manager.job());
 
-    runtime.block_on(async move {
+    let server = runtime.block_on(async move {
         let dns_future = tokio::spawn(dns.run());
         let http_future = tokio::spawn(http.run());
 
-        tokio::join!(dns_future, http_future)
-    });
+        match tokio::join!(dns_future, http_future) {
+            (Err(e), _) => Err(e),
+            (_, Err(e)) => Err(e),
+            _ => Ok(())
+        }
+    })?;
 
-    Ok(())
+    Ok(server)
 }
 
 

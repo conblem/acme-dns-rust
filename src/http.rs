@@ -1,6 +1,7 @@
 use warp::{Filter, serve};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use std::sync::Arc;
+use std::error::Error;
 use std::io::Cursor;
 use parking_lot::RwLock;
 use tokio_rustls::TlsAcceptor;
@@ -56,35 +57,43 @@ impl Http {
         *self.acceptor.write() = acceptor;
     }
 
-    pub async fn run(self) {
-        let https = Box::leak(Box::new(self.https.unwrap()));
-
-        let acceptor_stream = futures_util::stream::repeat(Arc::clone(&self.acceptor));
-        let stream = https
-            .incoming()
-            .zip(acceptor_stream)
-            .map(Ok)
-            .and_then(move |(stream, acceptor)| {
-                acceptor.read().accept(stream.unwrap())
-            });
-
+    pub async fn run(self) -> Result<(), impl Error> {
         let test = warp::path("hello")
             .and(warp::path::param())
             .map(|map: String| {
-                "test".to_string()
+                format!("{} test", map)
             });
 
-        let https_server = serve(test).serve_incoming(stream);
-        let https_spawn = tokio::spawn(async move {
-            https_server.await
+        let acceptor = Arc::clone(&self.acceptor);
+        let https = self.https.map(move |https| {
+            let https = Box::leak(Box::new(https));
+
+            let test = futures_util::stream::unfold(acceptor)
+            let acceptor_stream = futures_util::stream::repeat(acceptor);
+            let stream = https
+                .incoming()
+                .zip(acceptor_stream)
+                .map(Ok)
+                .and_then(|(stream, acceptor)| {
+                    acceptor.read().accept(stream.unwrap())
+                });
+
+            serve(test).serve_incoming(stream)
         });
 
-        let http_server = serve(test).serve_incoming(self.http.unwrap());
-        let http_spawn = tokio::spawn(async move {
-            http_server.await
-        });
+        let http = self.http.map(|http| serve(test).serve_incoming(http));
 
-        tokio::join!(https_spawn, http_spawn);
+        match (https, http) {
+            (Some(https), Some(http)) =>
+                match tokio::join!(tokio::spawn(https), tokio::spawn(http)) {
+                    (Err(e), _) => Err(e),
+                    (_, Err(e)) => Err(e),
+                    _ => Ok(()),
+                },
+            (Some(https), None) => tokio::spawn(https).await,
+            (None, Some(http)) => tokio::spawn(http).await,
+            _ => Ok(())
+        }
     }
 }
 
