@@ -194,7 +194,7 @@ impl CertManager {
         let mut private = cert.private_key_der();
         let mut cert = cert.certificate_der();
 
-        self.api.set_config(&mut private, &mut cert);
+        self.api.set_config(&mut private, &mut cert).unwrap();
 
         CertFacade::stop(&self.pool, memory_cert).await;
     }
