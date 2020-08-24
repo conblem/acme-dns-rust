@@ -1,5 +1,5 @@
-use sqlx::{Executor, Any};
 use serde::{Deserialize, Serialize};
+use sqlx::{Any, Executor};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
@@ -7,7 +7,7 @@ pub struct Domain {
     pub id: String,
     pub username: String,
     pub password: String,
-    pub txt: Option<String>
+    pub txt: Option<String>,
 }
 
 impl Default for Domain {
@@ -15,8 +15,12 @@ impl Default for Domain {
         Domain {
             id: Uuid::new_v4().to_simple().to_string(),
             username: Uuid::new_v4().to_simple().to_string(),
-            password: bcrypt::hash(uuid::Uuid::new_v4().to_simple().to_string(), bcrypt::DEFAULT_COST).unwrap(),
-            txt: None
+            password: bcrypt::hash(
+                uuid::Uuid::new_v4().to_simple().to_string(),
+                bcrypt::DEFAULT_COST,
+            )
+            .unwrap(),
+            txt: None,
         }
     }
 }
@@ -24,7 +28,7 @@ impl Default for Domain {
 struct DomainDOT {
     id: String,
     username: String,
-    password: String
+    password: String,
 }
 
 impl DomainDOT {
@@ -36,20 +40,22 @@ impl DomainDOT {
         DomainDOT {
             id,
             username,
-            password
+            password,
         }
     }
 }
 
-pub struct DomainFacade {
-}
+pub struct DomainFacade {}
 
 impl DomainFacade {
     pub fn new() -> Self {
         DomainFacade {}
     }
 
-    pub async fn find_by_id<'a, E: Executor<'a, Database = Any>>(executor: E, id: &str) -> Option<Domain> {
+    pub async fn find_by_id<'a, E: Executor<'a, Database = Any>>(
+        executor: E,
+        id: &str,
+    ) -> Option<Domain> {
         sqlx::query_as("SELECT * FROM domain WHERE id = $1 LIMIT 1")
             .bind(id)
             .fetch_optional(executor)

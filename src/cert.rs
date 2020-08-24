@@ -1,17 +1,20 @@
-use sqlx::{FromRow, Executor, Any, AnyPool};
-use chrono::naive::NaiveDateTime;
-use chrono::{Duration, Local, DateTime, Utc};
-use acme_lib::{Directory, DirectoryUrl, create_p384_key};
 use acme_lib::persist::MemoryPersist;
-use uuid::Uuid;
+use acme_lib::{create_p384_key, Directory, DirectoryUrl};
+use chrono::naive::NaiveDateTime;
+use chrono::{DateTime, Duration, Local, Utc};
+use sqlx::{Any, AnyPool, Executor, FromRow};
 use tokio::time::Interval;
+use uuid::Uuid;
 
+use crate::api::Api;
 use crate::domain::{Domain, DomainFacade};
-use crate::http::Http;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
-pub enum State { Ok = 0, Updating = 1 }
+pub enum State {
+    Ok = 0,
+    Updating = 1,
+}
 
 #[derive(FromRow, Debug)]
 pub struct Cert {
@@ -19,7 +22,7 @@ pub struct Cert {
     update: i64,
     state: State,
     #[sqlx(rename = "domain_id")]
-    pub domain: String
+    pub domain: String,
 }
 
 impl Cert {
@@ -28,16 +31,14 @@ impl Cert {
             id: Uuid::new_v4().to_simple().to_string(),
             update: Local::now().timestamp(),
             state: State::Updating,
-            domain: domain.id.clone()
+            domain: domain.id.clone(),
         }
     }
 }
 
-pub struct CertFacade {
-}
+pub struct CertFacade {}
 
-
-impl  CertFacade {
+impl CertFacade {
     pub async fn first_cert<'a, E: Executor<'a, Database = Any>>(executor: E) -> Option<Cert> {
         sqlx::query_as("SELECT * FROM cert LIMIT 1")
             .fetch_optional(executor)
@@ -77,20 +78,20 @@ impl  CertFacade {
                 cert.state = State::Updating;
                 CertFacade::update_cert(&mut transaction, &cert).await;
                 Some(cert)
-            },
+            }
             Some(mut cert) => {
                 let one_hour_ago = Local::now() - Duration::hours(1);
-                let update = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(cert.update, 0), Utc);
+                let update =
+                    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(cert.update, 0), Utc);
                 if update < one_hour_ago {
                     cert.update = Local::now().timestamp_millis();
                     cert.state = State::Updating;
                     CertFacade::update_cert(&mut transaction, &cert).await;
                     Some(cert)
-                }
-                else {
+                } else {
                     None
                 }
-            },
+            }
             None => {
                 let domain = Domain::default();
                 let cert = Cert::new(&domain);
@@ -98,7 +99,7 @@ impl  CertFacade {
                 DomainFacade::create_domain(&mut transaction, &domain).await;
                 CertFacade::create_cert(&mut transaction, &cert).await;
                 Some(cert)
-            },
+            }
         };
 
         transaction.commit().await.unwrap();
@@ -113,7 +114,7 @@ impl  CertFacade {
             Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
                 memory_cert.state = State::Ok;
                 CertFacade::update_cert(pool, &memory_cert).await;
-            },
+            }
             _ => {}
         }
 
@@ -123,15 +124,12 @@ impl  CertFacade {
 
 pub struct CertManager {
     pool: AnyPool,
-    http: Http
+    api: Api,
 }
 
 impl CertManager {
-    pub fn new(pool: AnyPool, http: Http) -> Self {
-        CertManager {
-            pool,
-            http
-        }
+    pub fn new(pool: AnyPool, api: Api) -> Self {
+        CertManager { pool, api }
     }
 
     fn interval() -> Interval {
@@ -152,7 +150,7 @@ impl CertManager {
     async fn test(&self) {
         let memory_cert = match CertFacade::start(&self.pool).await {
             Some(cert) => cert,
-            None => return
+            None => return,
         };
 
         println!("cert cert");
@@ -164,14 +162,15 @@ impl CertManager {
 
         println!("{:?}", domain);
 
-
         let url = DirectoryUrl::LetsEncryptStaging;
         let persist = MemoryPersist::new();
         let dir = Directory::from_url(persist, url).unwrap();
         let mut order = tokio::task::spawn_blocking(move || {
             let account = dir.account("acme-dns-rust@byom.de").unwrap();
             account.new_order("acme.wehrli.ml", &[]).unwrap()
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let auths = order.authorizations().unwrap();
         let call = auths[0].dns_challenge();
@@ -188,14 +187,15 @@ impl CertManager {
             let private = create_p384_key();
             let ord_crt = ord_csr.finalize_pkey(private, 5000).unwrap();
             ord_crt.download_and_save_cert().unwrap()
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let mut private = cert.private_key_der();
         let mut cert = cert.certificate_der();
 
-        self.http.set_config(&mut private, &mut cert);
+        self.api.set_config(&mut private, &mut cert).await;
 
         CertFacade::stop(&self.pool, memory_cert).await;
-
     }
 }
