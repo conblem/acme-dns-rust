@@ -90,8 +90,8 @@ impl Api {
 
     pub fn set_config(
         &self,
-        private: &mut Vec<u8>,
-        cert: &mut Vec<u8>,
+        private: &mut [u8],
+        cert: &mut [u8],
     ) -> Result<(), std::io::Error> {
         let mut private = Cursor::new(private);
         let mut privates = pkcs8_private_keys(&mut private)
