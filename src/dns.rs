@@ -1,4 +1,4 @@
-use sqlx::AnyPool;
+use sqlx::{AnyPool, PgPool};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::macros::support::Pin;
@@ -21,7 +21,7 @@ use std::error::Error;
 
 struct DatabaseAuthority {
     lower: LowerName,
-    pool: AnyPool,
+    pool: PgPool,
 }
 
 #[allow(dead_code)]
@@ -109,7 +109,7 @@ impl Authority for DatabaseAuthority {
 }
 
 impl DatabaseAuthority {
-    fn new(pool: AnyPool) -> Self {
+    fn new(pool: PgPool) -> Self {
         let lower = LowerName::from(Name::root());
 
         DatabaseAuthority { lower, pool }
@@ -137,7 +137,7 @@ impl DNS {
 pub struct DNSBuilder(UdpSocket);
 
 impl DNSBuilder {
-    pub fn build(self, pool: AnyPool, runtime: &Runtime) -> DNS {
+    pub fn build(self, pool: PgPool, runtime: &Runtime) -> DNS {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
         catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));

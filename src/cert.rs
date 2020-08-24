@@ -2,7 +2,7 @@ use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use chrono::naive::NaiveDateTime;
 use chrono::{DateTime, Duration, Local, Utc};
-use sqlx::{Any, AnyPool, Executor, FromRow};
+use sqlx::{Any, AnyPool, Executor, FromRow, PgPool, Postgres};
 use tokio::time::Interval;
 use uuid::Uuid;
 
@@ -39,14 +39,14 @@ impl Cert {
 pub struct CertFacade {}
 
 impl CertFacade {
-    pub async fn first_cert<'a, E: Executor<'a, Database = Any>>(executor: E) -> Option<Cert> {
+    pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E) -> Option<Cert> {
         sqlx::query_as("SELECT * FROM cert LIMIT 1")
             .fetch_optional(executor)
             .await
             .unwrap()
     }
 
-    async fn update_cert<'a, E: Executor<'a, Database = Any>>(executor: E, cert: &Cert) {
+    async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
         sqlx::query("UPDATE cert SET update = $1, state = $2, domain_id = $3 WHERE id = $4")
             .bind(&cert.update)
             .bind(&cert.state)
@@ -57,7 +57,7 @@ impl CertFacade {
             .unwrap();
     }
 
-    async fn create_cert<'a, E: Executor<'a, Database = Any>>(executor: E, cert: &Cert) {
+    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
         sqlx::query("INSERT INTO cert (id, update, state, domain_id) VALUES ($1, $2, $3, $4)")
             .bind(&cert.id)
             .bind(&cert.update)
@@ -68,7 +68,7 @@ impl CertFacade {
             .unwrap();
     }
 
-    pub async fn start(pool: &AnyPool) -> Option<Cert> {
+    pub async fn start(pool: &PgPool) -> Option<Cert> {
         let mut transaction = pool.begin().await.unwrap();
 
         let cert = CertFacade::first_cert(&mut transaction).await;
@@ -107,7 +107,7 @@ impl CertFacade {
         cert
     }
 
-    pub async fn stop(pool: &AnyPool, mut memory_cert: Cert) {
+    pub async fn stop(pool: &PgPool, mut memory_cert: Cert) {
         let mut transaction = pool.begin().await.unwrap();
 
         match CertFacade::first_cert(&mut transaction).await {
@@ -123,12 +123,12 @@ impl CertFacade {
 }
 
 pub struct CertManager {
-    pool: AnyPool,
+    pool: PgPool,
     api: Api,
 }
 
 impl CertManager {
-    pub fn new(pool: AnyPool, api: Api) -> Self {
+    pub fn new(pool: PgPool, api: Api) -> Self {
         CertManager { pool, api }
     }
 
@@ -143,7 +143,7 @@ impl CertManager {
         let mut interval = CertManager::interval();
         loop {
             interval.tick().await;
-            //self.test().await;
+            self.test().await;
         }
     }
 
