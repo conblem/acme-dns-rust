@@ -25,6 +25,8 @@ create table cert
 			primary key,
 	update bigint not null,
 	state integer not null,
+    private varchar,
+	cert varchar,
 	domain_id char(32) not null
 		constraint domain
 			references domain
