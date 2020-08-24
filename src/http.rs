@@ -57,7 +57,8 @@ impl Http {
         *self.acceptor.write() = acceptor;
     }
 
-    pub async fn run(mut self) -> Result<(), impl Error> {
+    //pub async fn run(mut self) -> Result<(), impl Error> {
+    pub async fn run(mut self) {
         let test = warp::path("hello")
             .and(warp::path::param())
             .map(|map: String| {
@@ -77,14 +78,16 @@ impl Http {
                     acceptor.read().accept(stream.unwrap())
                 });
 
-            Some(serve(test).run_incoming(stream))
+            Some(stream)
         } else {
             None
         };
+        let https = https.map(|https| serve(test).run_incoming(https));
 
         let http = self.http.map(|http| serve(test).run_incoming(http));
 
-        match (https, http) {
+
+        /*match (https, http) {
             (Some(https), Some(http)) =>
                 match tokio::join!(tokio::spawn(https), tokio::spawn(http)) {
                     (Err(e), _) => Err(e),
@@ -94,7 +97,8 @@ impl Http {
             (Some(https), None) => tokio::spawn(https).await,
             (None, Some(http)) => tokio::spawn(http).await,
             _ => Ok(())
-        }
+        }*/
+        http.unwrap().await
     }
 }
 
