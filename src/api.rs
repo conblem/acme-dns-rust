@@ -106,7 +106,7 @@ impl Api {
 
         let mut config = ServerConfig::new(Arc::new(NoClientAuth));
         config.set_single_cert(cert, private)
-            .map_err(|_| other_error("Couldn't configure Config with Cert and Private"));
+            .map_err(|_| other_error("Couldn't configure Config with Cert and Private"))?;
 
         let acceptor = TlsAcceptor::from(Arc::new(config));
         *self.acceptor.write() = acceptor;
