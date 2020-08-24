@@ -21,6 +21,8 @@ pub struct Cert {
     id: String,
     update: i64,
     state: State,
+    cert: Option<String>,
+    private: Option<String>,
     #[sqlx(rename = "domain_id")]
     pub domain: String,
 }
@@ -31,6 +33,8 @@ impl Cert {
             id: Uuid::new_v4().to_simple().to_string(),
             update: Local::now().timestamp(),
             state: State::Updating,
+            cert: None,
+            private: None,
             domain: domain.id.clone(),
         }
     }
@@ -47,9 +51,11 @@ impl CertFacade {
     }
 
     async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
-        sqlx::query("UPDATE cert SET update = $1, state = $2, domain_id = $3 WHERE id = $4")
+        sqlx::query("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
             .bind(&cert.update)
             .bind(&cert.state)
+            .bind(&cert.cert)
+            .bind(&cert.private)
             .bind(&cert.domain)
             .bind(&cert.id)
             .execute(executor)
@@ -58,10 +64,12 @@ impl CertFacade {
     }
 
     async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
-        sqlx::query("INSERT INTO cert (id, update, state, domain_id) VALUES ($1, $2, $3, $4)")
+        sqlx::query("INSERT INTO cert (id, update, state, cert, private, domain_id) VALUES ($1, $2, $3, $4, $5, $6)")
             .bind(&cert.id)
             .bind(&cert.update)
             .bind(&cert.state)
+            .bind(&cert.cert)
+            .bind(&cert.private)
             .bind(&cert.domain)
             .execute(executor)
             .await

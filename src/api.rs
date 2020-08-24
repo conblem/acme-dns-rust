@@ -114,7 +114,6 @@ impl Api {
         Ok(())
     }
 
-    //pub async fn run(mut self) -> Result<(), impl Error> {
     pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
         let test = warp::path("hello")
             .and(warp::path::param())
