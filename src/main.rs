@@ -32,18 +32,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cert_manager = CertManager::new(pool, api.clone());
     runtime.spawn(cert_manager.job());
 
-    let server = runtime.block_on(async move {
-        let dns_future = tokio::spawn(dns.run());
-        let http_future = tokio::spawn(api.run());
+    runtime.block_on(async move { tokio::try_join!(dns.spawn(), api.spawn()) })?;
 
-        match tokio::join!(dns_future, http_future) {
-            (Err(e), _) => Err(e),
-            (_, Err(e)) => Err(e),
-            _ => Ok(()),
-        }
-    })?;
-
-    Ok(server)
+    Ok(())
 }
 
 async fn setup_database() -> Result<(AnyPool, AnyKind), sqlx::Error> {

@@ -1,5 +1,6 @@
 use futures_util::stream::TryStream;
 use futures_util::StreamExt;
+use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::sign::{CertifiedKey, RSASigningKey, SigningKey};
 use rustls::{NoClientAuth, ResolvesServerCertUsingSNI, ServerConfig};
@@ -8,7 +9,6 @@ use std::io::Cursor;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
 use warp::{serve, Filter};
 
@@ -33,17 +33,16 @@ impl Https {
         Error = impl Into<Box<dyn std::error::Error + Send + Sync>>,
     > + Send {
         let acceptor = Arc::clone(&self.acceptor);
-        let acceptor_stream =
-            futures_util::stream::unfold(
-                acceptor,
-                |acc| async { Some((Arc::clone(&acc), acc)) },
-            );
+        let acceptor_stream = futures_util::stream::unfold(acceptor, |acc| async {
+            let acceptor = acc.read().clone();
+            Some((acceptor, acc))
+        });
 
         self.listener
             .zip(acceptor_stream)
             .then(|(stream, acceptor)| async move {
                 match stream {
-                    Ok(stream) => acceptor.read().await.accept(stream).await,
+                    Ok(stream) => acceptor.accept(stream).await,
                     Err(e) => Err(e),
                 }
             })
@@ -81,7 +80,7 @@ impl Api {
     }
 
     //error handling
-    pub async fn set_config(&self, private: &mut Vec<u8>, cert: &mut Vec<u8>) {
+    pub fn set_config(&self, private: &mut Vec<u8>, cert: &mut Vec<u8>) {
         let mut private = Cursor::new(private);
         let privates = pkcs8_private_keys(&mut private).unwrap();
         let private = privates.get(0).unwrap();
@@ -100,11 +99,11 @@ impl Api {
 
         let acceptor = TlsAcceptor::from(Arc::new(config));
 
-        *self.acceptor.write().await = acceptor;
+        *self.acceptor.write() = acceptor;
     }
 
     //pub async fn run(mut self) -> Result<(), impl Error> {
-    pub async fn run(self) -> Result<(), impl Error> {
+    pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
         let test = warp::path("hello")
             .and(warp::path::param())
             .map(|map: String| format!("{} test", map));
@@ -119,16 +118,17 @@ impl Api {
             .map(|https| serve(test).run_incoming(https.stream()))
             .map(tokio::spawn);
 
-        match (https, http) {
-            (Some(https), Some(http)) => match tokio::join!(https, http) {
-                (Err(e), _) => Err(e),
-                (_, Err(e)) => Err(e),
+        tokio::spawn(async {
+            match (https, http) {
+                (Some(https), Some(http)) => tokio::try_join!(https, http).map(|_| ()),
+                (Some(https), None) => https.await,
+                (None, Some(http)) => http.await,
                 _ => Ok(()),
-            },
-            (Some(https), None) => https.await,
-            (None, Some(http)) => http.await,
-            _ => Ok(()),
-        }
+            }
+        })
+        .await??;
+
+        Ok(())
     }
 }
 

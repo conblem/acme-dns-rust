@@ -17,7 +17,7 @@ use trust_dns_server::ServerFuture;
 
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
-use trust_dns_server::proto::error::ProtoError;
+use std::error::Error;
 
 struct DatabaseAuthority {
     lower: LowerName,
@@ -127,8 +127,8 @@ impl DNS {
         Ok(DNSBuilder(udp))
     }
 
-    pub async fn run(self) -> Result<(), ProtoError> {
-        self.server.block_until_done().await?;
+    pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
+        tokio::spawn(self.server.block_until_done()).await??;
 
         Ok(())
     }
