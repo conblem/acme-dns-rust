@@ -2,15 +2,25 @@ use futures_util::stream::TryStream;
 use futures_util::StreamExt;
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
-use rustls::sign::{CertifiedKey, RSASigningKey, SigningKey};
+use rustls::sign::{CertifiedKey, RSASigningKey};
 use rustls::{NoClientAuth, ResolvesServerCertUsingSNI, ServerConfig};
 use std::error::Error;
 use std::io::Cursor;
+use std::io::ErrorKind;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
 use warp::{serve, Filter};
+
+fn error(kind: ErrorKind, message: &str) -> std::io::Error {
+    let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
+    std::io::Error::new(kind, error)
+}
+
+fn other_error(message: &str) -> std::io::Error {
+    error(ErrorKind::Other, message)
+}
 
 pub struct Https {
     acceptor: Arc<RwLock<TlsAcceptor>>,
@@ -79,20 +89,28 @@ impl Api {
         })
     }
 
-    //error handling
-    pub fn set_config(&self, private: &mut Vec<u8>, cert: &mut Vec<u8>) {
+    pub fn set_config(
+        &self,
+        private: &mut Vec<u8>,
+        cert: &mut Vec<u8>,
+    ) -> Result<(), std::io::Error> {
         let mut private = Cursor::new(private);
-        let privates = pkcs8_private_keys(&mut private).unwrap();
-        let private = privates.get(0).unwrap();
-        let private: Arc<Box<dyn SigningKey>> =
-            Arc::new(Box::new(RSASigningKey::new(private).unwrap()));
+        let privates = pkcs8_private_keys(&mut private)
+            .map_err(|_| error(ErrorKind::InvalidInput, "Private is invalid"))?;
+        let private = privates
+            .get(0)
+            .ok_or_else(|| other_error("Private Vec is empty"))?;
+        let private = RSASigningKey::new(private)
+            .map_err(|_| other_error("Couldn't create SigningKey from Private"))?;
 
         let mut cert = Cursor::new(cert);
-        let cert = certs(&mut cert).unwrap();
+        let cert =
+            certs(&mut cert).map_err(|_| error(ErrorKind::InvalidInput, "Cert is invalid"))?;
 
-        let certified_key = CertifiedKey::new(cert, private);
+        let certified_key = CertifiedKey::new(cert, Arc::new(Box::new(private)));
         let mut sni = ResolvesServerCertUsingSNI::new();
-        sni.add("acme.wehrli.ml", certified_key).unwrap();
+        sni.add("acme.wehrli.ml", certified_key)
+            .map_err(|_| error(ErrorKind::InvalidInput, "Invalid SNI"))?;
 
         let mut config = ServerConfig::new(Arc::new(NoClientAuth));
         config.cert_resolver = Arc::new(sni);
@@ -100,6 +118,7 @@ impl Api {
         let acceptor = TlsAcceptor::from(Arc::new(config));
 
         *self.acceptor.write() = acceptor;
+        Ok(())
     }
 
     //pub async fn run(mut self) -> Result<(), impl Error> {
