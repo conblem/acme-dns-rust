@@ -2,8 +2,7 @@ use futures_util::stream::TryStream;
 use futures_util::StreamExt;
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
-use rustls::sign::{CertifiedKey, RSASigningKey};
-use rustls::{NoClientAuth, ResolvesServerCertUsingSNI, ServerConfig};
+use rustls::{NoClientAuth, ServerConfig};
 use std::error::Error;
 use std::io::Cursor;
 use std::io::ErrorKind;
@@ -95,28 +94,21 @@ impl Api {
         cert: &mut Vec<u8>,
     ) -> Result<(), std::io::Error> {
         let mut private = Cursor::new(private);
-        let privates = pkcs8_private_keys(&mut private)
+        let mut privates = pkcs8_private_keys(&mut private)
             .map_err(|_| error(ErrorKind::InvalidInput, "Private is invalid"))?;
         let private = privates
-            .get(0)
+            .pop()
             .ok_or_else(|| other_error("Private Vec is empty"))?;
-        let private = RSASigningKey::new(private)
-            .map_err(|_| other_error("Couldn't create SigningKey from Private"))?;
 
         let mut cert = Cursor::new(cert);
         let cert =
             certs(&mut cert).map_err(|_| error(ErrorKind::InvalidInput, "Cert is invalid"))?;
 
-        let certified_key = CertifiedKey::new(cert, Arc::new(Box::new(private)));
-        let mut sni = ResolvesServerCertUsingSNI::new();
-        sni.add("acme.wehrli.ml", certified_key)
-            .map_err(|_| error(ErrorKind::InvalidInput, "Invalid SNI"))?;
-
         let mut config = ServerConfig::new(Arc::new(NoClientAuth));
-        config.cert_resolver = Arc::new(sni);
+        config.set_single_cert(cert, private)
+            .map_err(|_| other_error("Couldn't configure Config with Cert and Private"));
 
         let acceptor = TlsAcceptor::from(Arc::new(config));
-
         *self.acceptor.write() = acceptor;
         Ok(())
     }
