@@ -1,0 +1,23 @@
+name: musl
+on: [push]
+
+jobs:
+  build:
+    # Job name is Greeting
+    name: Greeting
+    # This job runs on Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      # This step uses GitHub's hello-world-javascript-action: https://github.com/actions/hello-world-javascript-action
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          repository: docker.pkg.github.com/conblem/acme-dns-rust
+          tag_with_ref: true
+          tag_with_sha: true
+          dockerfile: cross/Musl
+          path: cross/
