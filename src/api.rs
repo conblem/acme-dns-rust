@@ -141,7 +141,10 @@ impl Api {
             None => None,
         };
 
-        Ok(Api { http, https })
+        Ok(Api {
+            http,
+            https,
+        })
     }
 
     pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
