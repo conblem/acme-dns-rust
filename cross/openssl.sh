@@ -46,4 +46,4 @@ main() {
     rm $0
 }
 
-main "${@}"docker build -t my/image:tag path/to/where/the/Dockerfile/resides
+main "${@}"
