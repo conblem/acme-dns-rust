@@ -1,13 +1,12 @@
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use sqlx::migrate::Migrator;
-use sqlx::{AnyPool, PgPool};
+use sqlx::PgPool;
 use std::error::Error;
 use tokio::runtime::Runtime;
 
 use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::DNS;
-use sqlx::any::{AnyConnectOptions, AnyKind, AnyPoolOptions};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
 

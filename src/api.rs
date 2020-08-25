@@ -88,11 +88,7 @@ impl Api {
         })
     }
 
-    pub fn set_config(
-        &self,
-        private: &mut [u8],
-        cert: &mut [u8],
-    ) -> Result<(), std::io::Error> {
+    pub fn set_config(&self, private: &mut [u8], cert: &mut [u8]) -> Result<(), std::io::Error> {
         let mut private = Cursor::new(private);
         let mut privates = pkcs8_private_keys(&mut private)
             .map_err(|_| error(ErrorKind::InvalidInput, "Private is invalid"))?;

@@ -2,7 +2,7 @@ use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use chrono::naive::NaiveDateTime;
 use chrono::{DateTime, Duration, Local, Utc};
-use sqlx::{Any, AnyPool, Executor, FromRow, PgPool, Postgres};
+use sqlx::{Executor, FromRow, PgPool, Postgres};
 use tokio::time::Interval;
 use uuid::Uuid;
 
@@ -156,7 +156,7 @@ impl CertManager {
     }
 
     async fn test(&self) {
-        let memory_cert = match CertFacade::start(&self.pool).await {
+        let mut memory_cert = match CertFacade::start(&self.pool).await {
             Some(cert) => cert,
             None => return,
         };
@@ -199,11 +199,17 @@ impl CertManager {
         .await
         .unwrap();
 
-        let mut private = cert.private_key().to_string().into_bytes();
-        let mut cert = cert.certificate().to_string().into_bytes();
+        let private = cert.private_key().to_string();
+        let cert = cert.certificate().to_string();
+        let mut private_bytes = private.clone().into_bytes();
+        let mut cert_bytes = cert.clone().into_bytes();
 
-        self.api.set_config(&mut private[..], &mut cert[..]).unwrap();
+        self.api
+            .set_config(&mut private_bytes[..], &mut cert_bytes[..])
+            .unwrap();
 
+        memory_cert.cert = Some(cert);
+        memory_cert.private = Some(private);
         CertFacade::stop(&self.pool, memory_cert).await;
     }
 }

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{Any, Executor, Postgres};
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]

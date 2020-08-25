@@ -1,4 +1,4 @@
-use sqlx::{AnyPool, PgPool};
+use sqlx::PgPool;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::macros::support::Pin;
