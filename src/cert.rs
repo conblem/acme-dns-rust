@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::api::Api;
 use crate::domain::{Domain, DomainFacade};
+use std::error::Error;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
@@ -152,12 +153,17 @@ impl CertManager {
 }
 
 impl CertManager {
-    pub async fn job(self) {
-        let mut interval = CertManager::interval();
-        loop {
-            interval.tick().await;
-            //self.test().await;
-        }
+    pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
+        tokio::spawn(async move {
+            let mut interval = CertManager::interval();
+            loop {
+                interval.tick().await;
+                //self.test().await;
+            }
+        })
+        .await?;
+
+        Ok(())
     }
 
     async fn test(&self) {

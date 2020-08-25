@@ -34,9 +34,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     ))?;
 
     let cert_manager = CertManager::new(pool);
-    runtime.spawn(cert_manager.job());
 
-    runtime.block_on(async move { tokio::try_join!(dns.spawn(), api.spawn()) })?;
+    runtime.block_on(
+        async move { tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn()) },
+    )?;
 
     Ok(())
 }
