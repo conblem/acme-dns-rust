@@ -1,7 +1,8 @@
 use crate::cert::{Cert, CertFacade};
-use log::error;
 use futures_util::stream::TryStream;
 use futures_util::{StreamExt, TryStreamExt};
+use log::error;
+use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
@@ -13,7 +14,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::{Accept, TlsAcceptor, TlsStream};
 use warp::{serve, Filter};
-use parking_lot::RwLock;
 
 fn error(kind: ErrorKind, message: &str) -> std::io::Error {
     let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
@@ -72,9 +72,11 @@ impl Acceptor {
         println!("new cert {:?}", new_cert);
 
         let mut db_cert = match (new_cert, self.cert.read().as_ref()) {
-            (Some(new_cert), Some(cert)) if &new_cert == cert => return Ok(self.tls_acceptor.read().clone()),
+            (Some(new_cert), Some(cert)) if &new_cert == cert => {
+                return Ok(self.tls_acceptor.read().clone())
+            }
             (Some(new_cert), _) => new_cert,
-            _ => return Ok(self.tls_acceptor.read().clone())
+            _ => return Ok(self.tls_acceptor.read().clone()),
         };
 
         println!("db cert {:?}", db_cert);
@@ -92,10 +94,7 @@ pub struct Https {
 }
 
 impl Https {
-    async fn new<A: ToSocketAddrs>(
-        pool: PgPool,
-        addr: A
-    ) -> tokio::io::Result<Self> {
+    async fn new<A: ToSocketAddrs>(pool: PgPool, addr: A) -> tokio::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
         Ok(Https { pool, listener })
     }
@@ -135,7 +134,7 @@ impl Api {
     pub async fn new<A: ToSocketAddrs>(
         http: Option<A>,
         https: Option<A>,
-        pool: PgPool
+        pool: PgPool,
     ) -> tokio::io::Result<Self> {
         let config = Arc::new(ServerConfig::new(NoClientAuth::new()));
         let acceptor = Arc::new(RwLock::new(TlsAcceptor::from(config)));
@@ -184,4 +183,3 @@ impl Api {
         Ok(())
     }
 }
-
