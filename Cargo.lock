@@ -8,6 +8,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "futures-util",
+ "log 0.4.11",
  "parking_lot",
  "rustls",
  "serde",

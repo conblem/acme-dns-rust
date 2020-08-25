@@ -1,6 +1,7 @@
 use crate::cert::{Cert, CertFacade};
+use log::error;
 use futures_util::stream::TryStream;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
@@ -68,11 +69,15 @@ impl Acceptor {
 
     async fn load_cert(&self) -> Result<TlsAcceptor, std::io::Error> {
         let mut new_cert = CertFacade::first_cert(&self.pool).await;
+        println!("new cert {:?}", new_cert);
 
         let mut db_cert = match (new_cert, self.cert.read().as_ref()) {
-            (Some(new_cert), Some(cert)) if &new_cert != cert => new_cert,
+            (Some(new_cert), Some(cert)) if &new_cert == cert => return Ok(self.tls_acceptor.read().clone()),
+            (Some(new_cert), _) => new_cert,
             _ => return Ok(self.tls_acceptor.read().clone())
         };
+
+        println!("db cert {:?}", db_cert);
 
         let tls_acceptor = Acceptor::create_cert(&mut db_cert)?;
         *self.tls_acceptor.write() = tls_acceptor.clone();
@@ -115,6 +120,8 @@ impl Https {
                     (_, Err(e)) => Err(e),
                 }
             })
+            .inspect_err(|err| error!("Stream error: {}", err))
+            .filter(|stream| futures_util::future::ready(stream.is_ok()))
     }
 }
 

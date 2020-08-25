@@ -16,7 +16,7 @@ pub enum State {
     Updating = 1,
 }
 
-#[derive(FromRow, Debug, PartialEq)]
+#[derive(FromRow, Debug)]
 pub struct Cert {
     id: String,
     update: i64,
@@ -25,6 +25,12 @@ pub struct Cert {
     pub private: Option<String>,
     #[sqlx(rename = "domain_id")]
     pub domain: String,
+}
+
+impl PartialEq for Cert {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.cert == other.cert && self.private == other.private
+    }
 }
 
 impl Cert {
