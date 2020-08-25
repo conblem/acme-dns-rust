@@ -1,16 +1,18 @@
+use crate::cert::{Cert, CertFacade};
 use futures_util::stream::TryStream;
 use futures_util::StreamExt;
-use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
+use sqlx::PgPool;
 use std::error::Error;
 use std::io::Cursor;
 use std::io::ErrorKind;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{Accept, TlsAcceptor, TlsStream};
 use warp::{serve, Filter};
+use parking_lot::RwLock;
 
 fn error(kind: ErrorKind, message: &str) -> std::io::Error {
     let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
@@ -21,74 +23,30 @@ fn other_error(message: &str) -> std::io::Error {
     error(ErrorKind::Other, message)
 }
 
-pub struct Https {
-    acceptor: Arc<RwLock<TlsAcceptor>>,
-    listener: TcpListener,
+struct Acceptor {
+    pool: PgPool,
+    cert: RwLock<Option<Cert>>,
+    tls_acceptor: RwLock<TlsAcceptor>,
 }
 
-impl Https {
-    async fn new<A: ToSocketAddrs>(
-        addr: A,
-        acceptor: Arc<RwLock<TlsAcceptor>>,
-    ) -> tokio::io::Result<Self> {
-        let listener = TcpListener::bind(addr).await?;
-        Ok(Https { acceptor, listener })
+impl Acceptor {
+    fn new(pool: PgPool) -> Self {
+        let config = ServerConfig::new(NoClientAuth::new());
+        let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+
+        Acceptor {
+            pool,
+            cert: RwLock::new(None),
+            tls_acceptor: RwLock::new(tls_acceptor),
+        }
     }
 
-    fn stream(
-        self,
-    ) -> impl TryStream<
-        Ok = impl AsyncRead + AsyncWrite + Send + 'static + Unpin,
-        Error = impl Into<Box<dyn std::error::Error + Send + Sync>>,
-    > + Send {
-        let acceptor = Arc::clone(&self.acceptor);
-        let acceptor_stream = futures_util::stream::unfold(acceptor, |acc| async {
-            let acceptor = acc.read().clone();
-            Some((acceptor, acc))
-        });
-
-        self.listener
-            .zip(acceptor_stream)
-            .then(|(stream, acceptor)| async move {
-                match stream {
-                    Ok(stream) => acceptor.accept(stream).await,
-                    Err(e) => Err(e),
-                }
-            })
-    }
-}
-
-pub struct Api {
-    acceptor: Arc<RwLock<TlsAcceptor>>,
-    http: Option<TcpListener>,
-    https: Option<Https>,
-}
-
-impl Api {
-    pub async fn new<A: ToSocketAddrs>(
-        http: Option<A>,
-        https: Option<A>,
-    ) -> tokio::io::Result<Self> {
-        let config = Arc::new(ServerConfig::new(NoClientAuth::new()));
-        let acceptor = Arc::new(RwLock::new(TlsAcceptor::from(config)));
-
-        let http = match http {
-            Some(http) => Some(TcpListener::bind(http).await?),
-            None => None,
-        };
-        let https = match https {
-            Some(https) => Some(Https::new(https, Arc::clone(&acceptor)).await?),
-            None => None,
+    fn create_cert(db_cert: &mut Cert) -> Result<TlsAcceptor, std::io::Error> {
+        let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
+            (Some(ref mut private), Some(ref mut cert)) => (private, cert),
+            _ => return Err(other_error("Cert has no Cert or Private")),
         };
 
-        Ok(Api {
-            acceptor,
-            http,
-            https,
-        })
-    }
-
-    pub fn set_config(&self, private: &mut [u8], cert: &mut [u8]) -> Result<(), std::io::Error> {
         let mut private = Cursor::new(private);
         let mut privates = pkcs8_private_keys(&mut private)
             .map_err(|_| error(ErrorKind::InvalidInput, "Private is invalid"))?;
@@ -105,9 +63,90 @@ impl Api {
             .set_single_cert(cert, private)
             .map_err(|_| other_error("Couldn't configure Config with Cert and Private"))?;
 
-        let acceptor = TlsAcceptor::from(Arc::new(config));
-        *self.acceptor.write() = acceptor;
-        Ok(())
+        Ok(TlsAcceptor::from(Arc::new(config)))
+    }
+
+    async fn load_cert(&self) -> Result<TlsAcceptor, std::io::Error> {
+        let mut new_cert = CertFacade::first_cert(&self.pool).await;
+
+        let mut db_cert = match (new_cert, self.cert.read().as_ref()) {
+            (Some(new_cert), Some(cert)) if &new_cert != cert => new_cert,
+            _ => return Ok(self.tls_acceptor.read().clone())
+        };
+
+        let tls_acceptor = Acceptor::create_cert(&mut db_cert)?;
+        *self.tls_acceptor.write() = tls_acceptor.clone();
+        *self.cert.write() = Some(db_cert);
+        Ok(tls_acceptor)
+    }
+}
+
+pub struct Https {
+    pool: PgPool,
+    listener: TcpListener,
+}
+
+impl Https {
+    async fn new<A: ToSocketAddrs>(
+        pool: PgPool,
+        addr: A
+    ) -> tokio::io::Result<Self> {
+        let listener = TcpListener::bind(addr).await?;
+        Ok(Https { pool, listener })
+    }
+
+    fn stream(
+        self,
+    ) -> impl TryStream<
+        Ok = impl AsyncRead + AsyncWrite + Send + 'static + Unpin,
+        Error = impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    > + Send {
+        let acceptor = Acceptor::new(self.pool);
+        let acceptor_stream = futures_util::stream::unfold(acceptor, |acc| async {
+            Some((acc.load_cert().await, acc))
+        });
+
+        self.listener
+            .zip(acceptor_stream)
+            .then(|item| async move {
+                match item {
+                    (Ok(stream), Ok(acceptor)) => acceptor.accept(stream).await,
+                    (Err(e), _) => Err(e),
+                    (_, Err(e)) => Err(e),
+                }
+            })
+    }
+}
+
+pub struct Api {
+    acceptor: Arc<RwLock<TlsAcceptor>>,
+    http: Option<TcpListener>,
+    https: Option<Https>,
+}
+
+impl Api {
+    pub async fn new<A: ToSocketAddrs>(
+        http: Option<A>,
+        https: Option<A>,
+        pool: PgPool
+    ) -> tokio::io::Result<Self> {
+        let config = Arc::new(ServerConfig::new(NoClientAuth::new()));
+        let acceptor = Arc::new(RwLock::new(TlsAcceptor::from(config)));
+
+        let http = match http {
+            Some(http) => Some(TcpListener::bind(http).await?),
+            None => None,
+        };
+        let https = match https {
+            Some(https) => Some(Https::new(pool, https).await?),
+            None => None,
+        };
+
+        Ok(Api {
+            acceptor,
+            http,
+            https,
+        })
     }
 
     pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
@@ -139,13 +178,3 @@ impl Api {
     }
 }
 
-impl Clone for Api {
-    fn clone(&self) -> Self {
-        let acceptor = Arc::clone(&self.acceptor);
-        Api {
-            acceptor,
-            http: None,
-            https: None,
-        }
-    }
-}

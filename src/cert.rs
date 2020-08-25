@@ -16,13 +16,13 @@ pub enum State {
     Updating = 1,
 }
 
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, PartialEq)]
 pub struct Cert {
     id: String,
     update: i64,
     state: State,
-    cert: Option<String>,
-    private: Option<String>,
+    pub cert: Option<String>,
+    pub private: Option<String>,
     #[sqlx(rename = "domain_id")]
     pub domain: String,
 }
@@ -132,12 +132,11 @@ impl CertFacade {
 
 pub struct CertManager {
     pool: PgPool,
-    api: Api,
 }
 
 impl CertManager {
-    pub fn new(pool: PgPool, api: Api) -> Self {
-        CertManager { pool, api }
+    pub fn new(pool: PgPool) -> Self {
+        CertManager { pool }
     }
 
     fn interval() -> Interval {
@@ -151,7 +150,7 @@ impl CertManager {
         let mut interval = CertManager::interval();
         loop {
             interval.tick().await;
-            self.test().await;
+            //self.test().await;
         }
     }
 
@@ -201,12 +200,6 @@ impl CertManager {
 
         let private = cert.private_key().to_string();
         let cert = cert.certificate().to_string();
-        let mut private_bytes = private.clone().into_bytes();
-        let mut cert_bytes = cert.clone().into_bytes();
-
-        self.api
-            .set_config(&mut private_bytes[..], &mut cert_bytes[..])
-            .unwrap();
 
         memory_cert.cert = Some(cert);
         memory_cert.private = Some(private);

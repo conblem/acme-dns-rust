@@ -27,9 +27,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .block_on(DNS::builder("0.0.0.0:3053".to_string()))?
         .build(pool.clone(), &runtime);
 
-    let api = runtime.block_on(Api::new(Some("0.0.0.0:8080"), Some("0.0.0.0:8081")))?;
+    let api = runtime.block_on(Api::new(Some("0.0.0.0:8080"), Some("0.0.0.0:8081"), pool.clone()))?;
 
-    let cert_manager = CertManager::new(pool, api.clone());
+    let cert_manager = CertManager::new(pool);
     runtime.spawn(cert_manager.job());
 
     runtime.block_on(async move { tokio::try_join!(dns.spawn(), api.spawn()) })?;
