@@ -6,7 +6,6 @@ use sqlx::{Executor, FromRow, PgPool, Postgres};
 use tokio::time::Interval;
 use uuid::Uuid;
 
-use crate::api::Api;
 use crate::domain::{Domain, DomainFacade};
 use std::error::Error;
 

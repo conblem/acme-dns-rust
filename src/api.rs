@@ -12,7 +12,7 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio_rustls::{Accept, TlsAcceptor, TlsStream};
+use tokio_rustls::TlsAcceptor;
 use warp::{serve, Filter};
 
 fn error(kind: ErrorKind, message: &str) -> std::io::Error {
@@ -68,8 +68,7 @@ impl Acceptor {
     }
 
     async fn load_cert(&self) -> Result<TlsAcceptor, std::io::Error> {
-        let mut new_cert = CertFacade::first_cert(&self.pool).await;
-        println!("new cert {:?}", new_cert);
+        let new_cert = CertFacade::first_cert(&self.pool).await;
 
         let mut db_cert = match (new_cert, self.cert.read().as_ref()) {
             (Some(new_cert), Some(cert)) if &new_cert == cert => {
@@ -78,8 +77,6 @@ impl Acceptor {
             (Some(new_cert), _) => new_cert,
             _ => return Ok(self.tls_acceptor.read().clone()),
         };
-
-        println!("db cert {:?}", db_cert);
 
         let tls_acceptor = Acceptor::create_cert(&mut db_cert)?;
         *self.tls_acceptor.write() = tls_acceptor.clone();
@@ -125,7 +122,6 @@ impl Https {
 }
 
 pub struct Api {
-    acceptor: Arc<RwLock<TlsAcceptor>>,
     http: Option<TcpListener>,
     https: Option<Https>,
 }
@@ -136,9 +132,6 @@ impl Api {
         https: Option<A>,
         pool: PgPool,
     ) -> tokio::io::Result<Self> {
-        let config = Arc::new(ServerConfig::new(NoClientAuth::new()));
-        let acceptor = Arc::new(RwLock::new(TlsAcceptor::from(config)));
-
         let http = match http {
             Some(http) => Some(TcpListener::bind(http).await?),
             None => None,
@@ -149,7 +142,6 @@ impl Api {
         };
 
         Ok(Api {
-            acceptor,
             http,
             https,
         })
