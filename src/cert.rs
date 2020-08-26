@@ -1,13 +1,21 @@
 use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use chrono::{DateTime, Duration, Local};
-use sqlx::{Database, Encode, Executor, FromRow, IntoArguments, PgPool, Pool, Postgres, Type};
+use sqlx::{Database, Encode, Executor, FromRow, IntoArguments, PgPool, Pool, Postgres, Type, Decode, ColumnIndex, Transaction, Execute, Describe};
 use tokio::time::Interval;
 use uuid::Uuid;
 
 use crate::domain::{Domain, DomainFacade};
-use sqlx::database::HasArguments;
+use sqlx::database::{HasArguments, HasStatement};
 use std::error::Error;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
+use std::cell::{RefCell, RefMut};
+use futures_util::future::{BoxFuture, Either};
+use futures_util::stream::BoxStream;
+use std::fmt::Debug;
+use futures_util::core_reexport::fmt::Formatter;
+use std::fmt;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
@@ -46,32 +54,94 @@ impl Cert {
     }
 }
 
-pub struct CertFacadeTwo<DB: Database> {
-    pool: Pool<DB>,
+impl<'p, DB: Database> Executor<'p> for &'_ mut Pool<DB> {
+    type Database = DB;
+
+    fn fetch_many<'e, 'q: 'e, E: 'q>(
+        self,
+        query: E,
+    ) -> BoxStream<'e, Result<Either<DB::Done, DB::Row>, Error>>
+        where
+            E: Execute<'q, Self::Database>,
+    {
+        self.fetch_many(query)
+    }
+
+    fn fetch_optional<'e, 'q: 'e, E: 'q>(
+        self,
+        query: E,
+    ) -> BoxFuture<'e, Result<Option<DB::Row>, Error>>
+        where
+            E: Execute<'q, Self::Database> {
+        self.fetch_optional(query)
+    }
+
+    fn prepare_with<'e, 'q: 'e>(
+        self,
+        sql: &'q str,
+        parameters: &'e [<Self::Database as Database>::TypeInfo],
+    ) -> BoxFuture<'e, Result<<Self::Database as HasStatement<'q>>::Statement, Error>> {
+        self.prepare_with(sql, parameters)
+    }
+
+    #[doc(hidden)]
+    fn describe<'e, 'q: 'e>(
+        self,
+        sql: &'q str,
+    ) -> BoxFuture<'e, Result<Describe<Self::Database>, Error>> {
+        self.describe(sql)
+    }
 }
 
-impl<'a, DB: Database> CertFacadeTwo<DB>
+struct Ex<'a, DB: Database>(Pool<DB>, PhantomData<&'a ()>)
 where
-    Cert: for<'b> FromRow<'b, DB::Row>,
     <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
     for<'b, 'c> &'b Pool<DB>: Executor<'c, Database = DB>,
-    for<'b> DateTime<Local>: Encode<'b, DB> + Type<DB>,
-    for<'b> String: Encode<'b, DB> + Type<DB>,
-    for<'b> Option<String>: Encode<'b, DB> + Type<DB>,
-    for<'b> i32: Encode<'b, DB> + Type<DB>,
+    for<'b> DateTime<Local>: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> String: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> Option<String>: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> i32: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> &'b str: ColumnIndex<DB::Row>;
+
+
+trait ExecutorRef<'a, DB: Database> {
+    type Ref: Executor<'a, Database = DB>;
+
+    fn get<'b: 'a>(&'b self) -> Self::Ref;
+}
+
+impl <'a, DB: Database> ExecutorRef<'a, DB> for Pool<DB> where for<'c> &'c mut DB::Connection: Executor<'c, Database = DB> {
+    type Ref = &'a Pool<DB>;
+
+    fn get<'b: 'a>(&'b self) -> Self::Ref {
+        self
+    }
+}
+
+
+pub struct CertFacadeTwo<DB>(PhantomData<DB>);
+
+impl<'a, DB: Database, E> CertFacadeTwo<E>
+where
+    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
+    for<'b, 'c> &'b Pool<DB>: Executor<'c, Database = DB>,
+    for<'b> DateTime<Local>: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> String: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> Option<String>: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> i32: Encode<'b, DB> + Decode<'b, DB> + Type<DB>,
+    for<'b> &'b str: ColumnIndex<DB::Row>,
+    for<'b> &'b mut E: Executor<'b, Database = DB> + Sized
 {
-    pub fn new(pool: Pool<DB>) -> Self {
-        CertFacadeTwo { pool }
-    }
-
-    pub async fn first_cert(&self) -> Option<Cert> {
-        sqlx::query_as("SELECT * FROM cert LIMIT 1")
-            .fetch_optional(&self.pool)
+    pub async fn first_cert(executor: &mut E) -> Option<Cert> {
+        sqlx::query_as::<DB, Cert>("SELECT * FROM cert LIMIT 1")
+            .fetch_optional(executor)
             .await
-            .unwrap()
+            .unwrap();
+
+        None
     }
 
-    pub async fn update_cert(&self, cert: &'a Cert) {
+    pub async fn update_cert(pool: &Pool<DB>, cert: &'a Cert) {
         sqlx::query("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
             .bind(&cert.update)
             .bind(&cert.state)
@@ -79,7 +149,7 @@ where
             .bind(&cert.private)
             .bind(&cert.domain)
             .bind(&cert.id)
-            .execute(&self.pool)
+            .execute(pool)
             .await
             .unwrap();
     }

@@ -9,6 +9,7 @@ use crate::cert::{CertFacadeTwo, CertManager};
 use crate::dns::DNS;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
+use std::cell::RefCell;
 
 mod api;
 mod cert;
@@ -23,6 +24,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let pool = runtime.block_on(setup_database())?;
 
+    let test = pool.clone();
+    runtime.block_on(async move {
+        let _facade = CertFacadeTwo::first_cert(&mut test);
+
+    });
+
     let dns = runtime
         .block_on(DNS::builder("0.0.0.0:3053".to_string()))?
         .build(pool.clone(), &runtime);
@@ -33,7 +40,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         pool.clone(),
     ))?;
 
-    let _facade = CertFacadeTwo::new(pool.clone());
 
     let cert_manager = CertManager::new(pool);
 
