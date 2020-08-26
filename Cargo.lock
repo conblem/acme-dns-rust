@@ -8,6 +8,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "futures-util",
+ "generic-std",
  "log",
  "parking_lot",
  "rustls 0.18.1",
@@ -653,6 +654,12 @@ dependencies = [
  "typenum",
  "version_check",
 ]
+
+[[package]]
+name = "generic-std"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08c7cb350078b46adbc2d49c32597d8eb8e4b75ddfafacaab13f1addec07d542"
 
 [[package]]
 name = "getrandom"
@@ -1794,6 +1801,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "bytes",
+ "chrono",
  "crc",
  "crossbeam-channel",
  "crossbeam-queue",

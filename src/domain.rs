@@ -1,5 +1,7 @@
+use futures_util::core_reexport::marker::PhantomData;
+use generic_std::plug::{PlugLifetime, PlugType};
 use serde::{Deserialize, Serialize};
-use sqlx::{Executor, Postgres};
+use sqlx::{Database, Executor, MySql, Pool, Postgres};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
@@ -21,26 +23,6 @@ impl Default for Domain {
             )
             .unwrap(),
             txt: None,
-        }
-    }
-}
-
-struct DomainDOT {
-    id: String,
-    username: String,
-    password: String,
-}
-
-impl DomainDOT {
-    fn new() -> Self {
-        let id = uuid::Uuid::new_v4().to_simple().to_string();
-        let username = uuid::Uuid::new_v4().to_simple().to_string();
-        let password = uuid::Uuid::new_v4().to_simple().to_string();
-
-        DomainDOT {
-            id,
-            username,
-            password,
         }
     }
 }

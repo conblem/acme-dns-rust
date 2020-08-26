@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4"
-sqlx = { version = "0.4.0-beta.1", default-features = false, features = [ "runtime-tokio", "macros", "postgres", "mysql", "any", "migrate" ] }
+sqlx = { version = "0.4.0-beta.1", default-features = false, features = [ "runtime-tokio", "macros", "postgres", "mysql", "any", "migrate", "chrono" ] }
 tokio = { version = "0.2", features = ["full"] }
 uuid = { version = "0.8", features = ["v4"] }
 simplelog = "^0.7.6"
@@ -23,3 +23,4 @@ parking_lot = "0.11.0"
 futures-util = "0.3.5"
 rustls = "0.18"
 tokio-rustls = "0.14"
+generic-std = "0.1.0"

@@ -1,12 +1,17 @@
 use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use chrono::naive::NaiveDateTime;
-use chrono::{DateTime, Duration, Local, Utc};
-use sqlx::{Executor, FromRow, PgPool, Postgres};
+use chrono::{DateTime, Duration, Local, TimeZone, Utc};
+use sqlx::{
+    Any, Arguments, Database, Encode, Executor, FromRow, IntoArguments, PgPool, Pool, Postgres,
+    Type,
+};
 use tokio::time::Interval;
 use uuid::Uuid;
 
 use crate::domain::{Domain, DomainFacade};
+use futures_util::core_reexport::marker::PhantomData;
+use sqlx::database::HasArguments;
 use std::error::Error;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
@@ -19,7 +24,7 @@ pub enum State {
 #[derive(FromRow, Debug)]
 pub struct Cert {
     id: String,
-    update: i64,
+    update: DateTime<Local>,
     state: State,
     pub cert: Option<String>,
     pub private: Option<String>,
@@ -37,7 +42,7 @@ impl Cert {
     fn new(domain: &Domain) -> Self {
         Cert {
             id: Uuid::new_v4().to_simple().to_string(),
-            update: Local::now().timestamp(),
+            update: Local::now(),
             state: State::Updating,
             cert: None,
             private: None,
@@ -46,10 +51,63 @@ impl Cert {
     }
 }
 
+/*impl <'a, DB: Database, E: Executor<'a, Database = DB>> CertFacadeTwo<'a,'b  DB, E> where DB: IntoArguments<'a, DB> {
+    pub async fn first_cert(&self) -> Option<Cert> {
+        sqlx::query_as("SELECT * FROM cert LIMIT 1")
+            .fetch_optional(self.pool)
+            .await
+            .unwrap()
+    }
+
+}*/
+
+pub struct CertFacadeTwo<DB: Database>
+{
+    pool: Pool<DB>,
+}
+
+impl<'a, DB: Database> CertFacadeTwo<DB>
+where
+    Cert: for<'b> FromRow<'b, DB::Row>,
+    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
+    for<'b, 'c> &'b Pool<DB>: Executor<'c, Database = DB>,
+    for<'b> DateTime<Local>: Encode<'b, DB> + Type<DB>,
+    for<'b> String: Encode<'b, DB> + Type<DB>,
+    for<'b> Option<String>: Encode<'b, DB> + Type<DB>,
+    for<'b> i32: Encode<'b, DB> + Type<DB>,
+{
+    pub fn new(pool: Pool<DB>) -> Self {
+        CertFacadeTwo { pool }
+    }
+
+    pub async fn first_cert(&self) -> Option<Cert> {
+        sqlx::query_as("SELECT * FROM cert LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await
+            .unwrap()
+    }
+
+    pub async fn update_cert(&self, cert: &'a Cert) {
+        sqlx::query::<DB>("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
+            .bind(&cert.update)
+            .bind(&cert.state)
+            .bind(&cert.cert)
+            .bind(&cert.private)
+            .bind(&cert.domain)
+            .bind(&cert.id)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+}
+
 pub struct CertFacade {}
 
 impl CertFacade {
-    pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E) -> Option<Cert> {
+    pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E) -> Option<Cert>
+    where
+        DateTime<Local>: Type<Postgres>,
+    {
         sqlx::query_as("SELECT * FROM cert LIMIT 1")
             .fetch_optional(executor)
             .await
@@ -95,10 +153,8 @@ impl CertFacade {
             }
             Some(mut cert) => {
                 let one_hour_ago = Local::now() - Duration::hours(1);
-                let update =
-                    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(cert.update, 0), Utc);
-                if update < one_hour_ago {
-                    cert.update = Local::now().timestamp_millis();
+                if cert.update < one_hour_ago {
+                    cert.update = Local::now();
                     cert.state = State::Updating;
                     CertFacade::update_cert(&mut transaction, &cert).await;
                     Some(cert)
