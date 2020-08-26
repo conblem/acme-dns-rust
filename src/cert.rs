@@ -46,16 +46,6 @@ impl Cert {
     }
 }
 
-/*impl <'a, DB: Database, E: Executor<'a, Database = DB>> CertFacadeTwo<'a,'b  DB, E> where DB: IntoArguments<'a, DB> {
-    pub async fn first_cert(&self) -> Option<Cert> {
-        sqlx::query_as("SELECT * FROM cert LIMIT 1")
-            .fetch_optional(self.pool)
-            .await
-            .unwrap()
-    }
-
-}*/
-
 pub struct CertFacadeTwo<DB: Database> {
     pool: Pool<DB>,
 }
@@ -82,7 +72,7 @@ where
     }
 
     pub async fn update_cert(&self, cert: &'a Cert) {
-        sqlx::query::<DB>("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
+        sqlx::query("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
             .bind(&cert.update)
             .bind(&cert.state)
             .bind(&cert.cert)
