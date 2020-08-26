@@ -1,16 +1,11 @@
 use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
-use chrono::naive::NaiveDateTime;
-use chrono::{DateTime, Duration, Local, TimeZone, Utc};
-use sqlx::{
-    Any, Arguments, Database, Encode, Executor, FromRow, IntoArguments, PgPool, Pool, Postgres,
-    Type,
-};
+use chrono::{DateTime, Duration, Local};
+use sqlx::{Database, Encode, Executor, FromRow, IntoArguments, PgPool, Pool, Postgres, Type};
 use tokio::time::Interval;
 use uuid::Uuid;
 
 use crate::domain::{Domain, DomainFacade};
-use futures_util::core_reexport::marker::PhantomData;
 use sqlx::database::HasArguments;
 use std::error::Error;
 
@@ -61,8 +56,7 @@ impl Cert {
 
 }*/
 
-pub struct CertFacadeTwo<DB: Database>
-{
+pub struct CertFacadeTwo<DB: Database> {
     pool: Pool<DB>,
 }
 

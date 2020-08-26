@@ -1,7 +1,5 @@
-use futures_util::core_reexport::marker::PhantomData;
-use generic_std::plug::{PlugLifetime, PlugType};
 use serde::{Deserialize, Serialize};
-use sqlx::{Database, Executor, MySql, Pool, Postgres};
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]

@@ -1,11 +1,11 @@
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use sqlx::migrate::Migrator;
-use sqlx::{PgPool, Postgres};
+use sqlx::PgPool;
 use std::error::Error;
 use tokio::runtime::Runtime;
 
 use crate::api::Api;
-use crate::cert::{CertFacadeTwo, CertManager, Cert};
+use crate::cert::{CertFacadeTwo, CertManager};
 use crate::dns::DNS;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
@@ -33,12 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         pool.clone(),
     ))?;
 
-    let facade = CertFacadeTwo::new(pool.clone());
-    runtime.block_on(async move {
-        let cert = facade.first_cert().await.unwrap();
-        facade.update_cert(&cert).await;
-
-    });
+    let _facade = CertFacadeTwo::new(pool.clone());
 
     let cert_manager = CertManager::new(pool);
 
