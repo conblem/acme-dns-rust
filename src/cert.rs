@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::domain::{Domain, DomainFacade};
 use sqlx::database::HasArguments;
 use std::error::Error;
+use std::io::ErrorKind;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
@@ -43,45 +44,6 @@ impl Cert {
             private: None,
             domain: domain.id.clone(),
         }
-    }
-}
-
-pub struct CertFacadeTwo<DB: Database> {
-    pool: Pool<DB>,
-}
-
-impl<'a, DB: Database> CertFacadeTwo<DB>
-where
-    Cert: for<'b> FromRow<'b, DB::Row>,
-    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
-    for<'b, 'c> &'b Pool<DB>: Executor<'c, Database = DB>,
-    for<'b> DateTime<Local>: Encode<'b, DB> + Type<DB>,
-    for<'b> String: Encode<'b, DB> + Type<DB>,
-    for<'b> Option<String>: Encode<'b, DB> + Type<DB>,
-    for<'b> i32: Encode<'b, DB> + Type<DB>,
-{
-    pub fn new(pool: Pool<DB>) -> Self {
-        CertFacadeTwo { pool }
-    }
-
-    pub async fn first_cert(&self) -> Option<Cert> {
-        sqlx::query_as("SELECT * FROM cert LIMIT 1")
-            .fetch_optional(&self.pool)
-            .await
-            .unwrap()
-    }
-
-    pub async fn update_cert(&self, cert: &'a Cert) {
-        sqlx::query("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
-            .bind(&cert.update)
-            .bind(&cert.state)
-            .bind(&cert.cert)
-            .bind(&cert.private)
-            .bind(&cert.domain)
-            .bind(&cert.id)
-            .execute(&self.pool)
-            .await
-            .unwrap();
     }
 }
 
@@ -191,6 +153,15 @@ impl CertManager {
     }
 }
 
+fn error(kind: ErrorKind, message: &str) -> std::io::Error {
+    let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
+    std::io::Error::new(kind, error)
+}
+
+fn other_error(message: &str) -> std::io::Error {
+    error(ErrorKind::Other, message)
+}
+
 impl CertManager {
     pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
         tokio::spawn(async move {
@@ -205,33 +176,28 @@ impl CertManager {
         Ok(())
     }
 
-    async fn test(&self) {
-        let mut memory_cert = match CertFacade::start(&self.pool).await {
-            Some(cert) => cert,
-            None => return,
-        };
+    async fn test(&self) -> Result<(), Box<dyn Error>> {
+        let mut memory_cert = CertFacade::start(&self.pool)
+            .await
+            .ok_or_else(|| other_error("Cert not found"))?;
 
-        println!("cert cert");
-        println!("{:?}", memory_cert);
-
+        //improve
         let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await
             .expect("must have in sql");
 
-        println!("{:?}", domain);
-
-        let url = DirectoryUrl::LetsEncryptStaging;
-        let persist = MemoryPersist::new();
-        let dir = Directory::from_url(persist, url).unwrap();
+        let dir = Directory::from_url(MemoryPersist::new(), DirectoryUrl::LetsEncryptStaging)?;
         let mut order = tokio::task::spawn_blocking(move || {
-            let account = dir.account("acme-dns-rust@byom.de").unwrap();
-            account.new_order("acme.wehrli.ml", &[]).unwrap()
+            let account = dir.account("acme-dns-rust@byom.de")?;
+            account.new_order("acme.wehrli.ml", &[])
         })
-        .await
-        .unwrap();
+        .await??;
 
-        let auths = order.authorizations().unwrap();
-        let call = auths[0].dns_challenge();
+        let mut auths = order.authorizations()?;
+        let mut call = auths
+            .pop()
+            .ok_or_else(|| other_error("couldn't unpack auths"))?
+            .dns_challenge();
         let proof = call.dns_proof();
 
         domain.txt = Some(proof);
@@ -240,14 +206,14 @@ impl CertManager {
         //error handling
         let cert = tokio::task::spawn_blocking(move || {
             call.validate(5000);
-            order.refresh().unwrap();
+            order.refresh()?;
+            // fix
             let ord_csr = order.confirm_validations().unwrap();
             let private = create_p384_key();
-            let ord_crt = ord_csr.finalize_pkey(private, 5000).unwrap();
-            ord_crt.download_and_save_cert().unwrap()
+            let ord_crt = ord_csr.finalize_pkey(private, 5000)?;
+            ord_crt.download_and_save_cert()
         })
-        .await
-        .unwrap();
+        .await??;
 
         let private = cert.private_key().to_string();
         let cert = cert.certificate().to_string();
@@ -255,5 +221,7 @@ impl CertManager {
         memory_cert.cert = Some(cert);
         memory_cert.private = Some(private);
         CertFacade::stop(&self.pool, memory_cert).await;
+
+        Ok(())
     }
 }

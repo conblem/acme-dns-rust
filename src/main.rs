@@ -5,7 +5,7 @@ use std::error::Error;
 use tokio::runtime::Runtime;
 
 use crate::api::Api;
-use crate::cert::{CertFacadeTwo, CertManager};
+use crate::cert::CertManager;
 use crate::dns::DNS;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
@@ -32,8 +32,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some("0.0.0.0:8081"),
         pool.clone(),
     ))?;
-
-    let _facade = CertFacadeTwo::new(pool.clone());
 
     let cert_manager = CertManager::new(pool);
 
