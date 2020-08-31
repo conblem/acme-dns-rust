@@ -1,5 +1,10 @@
 name: musl
-on: [push]
+on:
+  push:
+    paths:
+      - 'cross/**'
+    branches:
+      - master
 
 jobs:
   build:
