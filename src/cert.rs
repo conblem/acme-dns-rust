@@ -194,7 +194,7 @@ impl CertManager {
         .await??;
 
         let mut auths = order.authorizations()?;
-        let mut call = auths
+        let call = auths
             .pop()
             .ok_or_else(|| other_error("couldn't unpack auths"))?
             .dns_challenge();
