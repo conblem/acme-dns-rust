@@ -14,6 +14,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
 use warp::{serve, Filter};
+use std::ops::Deref;
 
 fn error(kind: ErrorKind, message: &str) -> std::io::Error {
     let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
@@ -26,23 +27,20 @@ fn other_error(message: &str) -> std::io::Error {
 
 struct Acceptor {
     pool: PgPool,
-    cert: RwLock<Option<Cert>>,
-    tls_acceptor: RwLock<TlsAcceptor>,
+    config: RwLock<(Option<Cert>, Arc<ServerConfig>)>
 }
 
 impl Acceptor {
     fn new(pool: PgPool) -> Self {
-        let config = ServerConfig::new(NoClientAuth::new());
-        let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+        let server_config = ServerConfig::new(NoClientAuth::new());
 
         Acceptor {
             pool,
-            cert: RwLock::new(None),
-            tls_acceptor: RwLock::new(tls_acceptor),
+            config: RwLock::new((None, Arc::new(server_config))),
         }
     }
 
-    fn create_cert(db_cert: &mut Cert) -> Result<TlsAcceptor, std::io::Error> {
+    fn create_server_config(db_cert: &mut Cert) -> Result<Arc<ServerConfig>, std::io::Error> {
         let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
             (Some(ref mut private), Some(ref mut cert)) => (private, cert),
             _ => return Err(other_error("Cert has no Cert or Private")),
@@ -64,24 +62,25 @@ impl Acceptor {
             .set_single_cert(cert, private)
             .map_err(|_| other_error("Couldn't configure Config with Cert and Private"))?;
 
-        Ok(TlsAcceptor::from(Arc::new(config)))
+        Ok(Arc::new(config))
     }
 
     async fn load_cert(&self) -> Result<TlsAcceptor, std::io::Error> {
         let new_cert = CertFacade::first_cert(&self.pool).await;
 
-        let mut db_cert = match (new_cert, self.cert.read().as_ref()) {
-            (Some(new_cert), Some(cert)) if &new_cert == cert => {
-                return Ok(self.tls_acceptor.read().clone())
+        let mut db_cert = match (new_cert, self.config.read().deref()) {
+            (Some(new_cert), (Some(cert), server_config)) if &new_cert == cert => {
+                return Ok(TlsAcceptor::from(Arc::clone(server_config)))
             }
             (Some(new_cert), _) => new_cert,
-            _ => return Ok(self.tls_acceptor.read().clone()),
+            (_, (_, server_config)) => {
+                return Ok(TlsAcceptor::from(Arc::clone(server_config)))
+            }
         };
 
-        let tls_acceptor = Acceptor::create_cert(&mut db_cert)?;
-        *self.tls_acceptor.write() = tls_acceptor.clone();
-        *self.cert.write() = Some(db_cert);
-        Ok(tls_acceptor)
+        let server_config = Acceptor::create_server_config(&mut db_cert)?;
+        *self.config.write() = (Some(db_cert), Arc::clone(&server_config));
+        Ok(TlsAcceptor::from(server_config))
     }
 }
 
