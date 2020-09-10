@@ -158,15 +158,12 @@ impl Api {
             .map(|https| serve(test).run_incoming(https.stream()))
             .map(tokio::spawn);
 
-        tokio::spawn(async {
-            match (https, http) {
-                (Some(https), Some(http)) => tokio::try_join!(https, http).map(|_| ()),
-                (Some(https), None) => https.await,
-                (None, Some(http)) => http.await,
-                _ => Ok(()),
-            }
-        })
-        .await??;
+        match (https, http) {
+            (Some(https), Some(http)) => tokio::try_join!(https, http).map(|_| ()),
+            (Some(https), None) => https.await,
+            (None, Some(http)) => http.await,
+            _ => Ok(()),
+        }?;
 
         Ok(())
     }
