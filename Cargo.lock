@@ -16,6 +16,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tokio-rustls",
+ "toml",
  "trust-dns-client",
  "trust-dns-server",
  "uuid",

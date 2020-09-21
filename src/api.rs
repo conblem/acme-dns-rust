@@ -1,4 +1,5 @@
 use crate::cert::{Cert, CertFacade};
+use crate::domain::{Domain, DomainFacade};
 use futures_util::stream::TryStream;
 use futures_util::{StreamExt, TryStreamExt};
 use log::error;
@@ -9,12 +10,12 @@ use sqlx::PgPool;
 use std::error::Error;
 use std::io::Cursor;
 use std::io::ErrorKind;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
-use warp::{serve, Filter};
-use std::ops::Deref;
+use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
 
 fn error(kind: ErrorKind, message: &str) -> std::io::Error {
     let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
@@ -27,7 +28,7 @@ fn other_error(message: &str) -> std::io::Error {
 
 struct Acceptor {
     pool: PgPool,
-    config: RwLock<(Option<Cert>, Arc<ServerConfig>)>
+    config: RwLock<(Option<Cert>, Arc<ServerConfig>)>,
 }
 
 impl Acceptor {
@@ -61,6 +62,7 @@ impl Acceptor {
         config
             .set_single_cert(cert, private)
             .map_err(|_| other_error("Couldn't configure Config with Cert and Private"))?;
+        config.set_protocols(&["h2".into(), "http/1.1".into()]);
 
         Ok(Arc::new(config))
     }
@@ -68,14 +70,13 @@ impl Acceptor {
     async fn load_cert(&self) -> Result<TlsAcceptor, std::io::Error> {
         let new_cert = CertFacade::first_cert(&self.pool).await;
 
+        // could probably be improved
         let mut db_cert = match (new_cert, self.config.read().deref()) {
             (Some(new_cert), (Some(cert), server_config)) if &new_cert == cert => {
                 return Ok(TlsAcceptor::from(Arc::clone(server_config)))
             }
             (Some(new_cert), _) => new_cert,
-            (_, (_, server_config)) => {
-                return Ok(TlsAcceptor::from(Arc::clone(server_config)))
-            }
+            (_, (_, server_config)) => return Ok(TlsAcceptor::from(Arc::clone(server_config))),
         };
 
         let server_config = Acceptor::create_server_config(&mut db_cert)?;
@@ -123,6 +124,22 @@ impl Https {
 pub struct Api {
     http: Option<TcpListener>,
     https: Option<Https>,
+    pool: PgPool,
+}
+
+async fn register(pool: PgPool, domain: Domain) -> Result<reply::Response, Rejection> {
+    let domain = match DomainFacade::create_domain(&pool, &domain).await {
+        Err(e) => {
+            return Ok(Response::builder()
+                .status(500)
+                .body("")
+                .unwrap()
+                .into_response())
+        }
+        Ok(domain) => domain,
+    };
+
+    Ok(Response::new("no error").into_response())
 }
 
 impl Api {
@@ -136,26 +153,29 @@ impl Api {
             None => None,
         };
         let https = match https {
-            Some(https) => Some(Https::new(pool, https).await?),
+            Some(https) => Some(Https::new(pool.clone(), https).await?),
             None => None,
         };
 
-        Ok(Api { http, https })
+        Ok(Api { http, https, pool })
     }
 
     pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
-        let test = warp::path("hello")
-            .and(warp::path::param())
-            .map(|map: String| format!("{} test", map));
+        let pool = self.pool;
+        let routes = warp::path("register")
+            .and(warp::post())
+            .map(move || pool.clone())
+            .and(warp::body::json())
+            .and_then(register);
 
         let http = self
             .http
-            .map(|http| serve(test).run_incoming(http))
+            .map(|http| serve(routes.clone()).run_incoming(http))
             .map(tokio::spawn);
 
         let https = self
             .https
-            .map(|https| serve(test).run_incoming(https.stream()))
+            .map(|https| serve(routes).run_incoming(https.stream()))
             .map(tokio::spawn);
 
         match (https, http) {

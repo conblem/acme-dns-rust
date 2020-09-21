@@ -14,22 +14,27 @@ mod api;
 mod cert;
 mod dns;
 mod domain;
+mod config;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut runtime = Runtime::new()?;
-    SimpleLogger::init(LevelFilter::Trace, Config::default())?;
+    SimpleLogger::init(LevelFilter::Debug, Config::default())?;
+
+    let config = runtime.block_on(config::config())?;
+    println!("{:?}", config);
 
     let pool = runtime.block_on(setup_database())?;
 
     let dns = runtime
-        .block_on(DNS::builder("0.0.0.0:3053".to_string()))?
+        .block_on(DNS::builder(config.general.listen))?
         .build(pool.clone(), &runtime);
 
+    let https = format!("{}:{}", config.api.ip, config.api.port);
     let api = runtime.block_on(Api::new(
         Some("0.0.0.0:8080"),
-        Some("0.0.0.0:8081"),
+        Some(&https),
         pool.clone(),
     ))?;
 

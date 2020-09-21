@@ -1,12 +1,11 @@
 use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use chrono::{DateTime, Duration, Local};
-use sqlx::{Database, Encode, Executor, FromRow, IntoArguments, PgPool, Pool, Postgres, Type};
+use sqlx::{Executor, FromRow, PgPool, Postgres, Type};
 use tokio::time::Interval;
 use uuid::Uuid;
 
 use crate::domain::{Domain, DomainFacade};
-use sqlx::database::HasArguments;
 use std::error::Error;
 use std::io::ErrorKind;
 
