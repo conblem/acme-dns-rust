@@ -139,11 +139,12 @@ impl CertFacade {
 
 pub struct CertManager {
     pool: PgPool,
+    acme: String,
 }
 
 impl CertManager {
-    pub fn new(pool: PgPool) -> Self {
-        CertManager { pool }
+    pub fn new(pool: PgPool, acme: String) -> Self {
+        CertManager { pool, acme }
     }
 
     fn interval() -> Interval {
@@ -185,7 +186,7 @@ impl CertManager {
             .await
             .expect("must have in sql");
 
-        let dir = Directory::from_url(MemoryPersist::new(), DirectoryUrl::LetsEncryptStaging)?;
+        let dir = Directory::from_url(MemoryPersist::new(), DirectoryUrl::Other(&self.acme))?;
         let mut order = tokio::task::spawn_blocking(move || {
             let account = dir.account("acme-dns-rust@byom.de")?;
             account.new_order("acme.wehrli.ml", &[])

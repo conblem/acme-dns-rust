@@ -1,17 +1,24 @@
 use serde::Deserialize;
+use std::error::Error;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-use std::error::Error;
 
 #[derive(Deserialize, Debug)]
 pub struct Api {
-    pub ip: String,
-    pub port: String,
+    pub http: Option<String>,
+    pub https: Option<String>,
+}
+
+fn default_acme() -> String {
+    "https://acme-v02.api.letsencrypt.org/directory".to_string()
 }
 
 #[derive(Deserialize, Debug)]
 pub struct General {
-    pub listen: String
+    pub dns: String,
+    pub db: String,
+    #[serde(default = "default_acme")]
+    pub acme: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -20,9 +27,11 @@ pub struct Config {
     pub api: Api,
 }
 
+const DEFAULT_CONFIG_PATH: &str = "config.toml";
 
-pub async fn config() -> Result<Config, Box<dyn Error>>{
-    let mut file = File::open("config.toml").await?;
+pub async fn config(config_path: Option<String>) -> Result<Config, Box<dyn Error>> {
+    let config_path = config_path.as_deref().unwrap_or(DEFAULT_CONFIG_PATH);
+    let mut file = File::open(config_path).await?;
     let mut bytes = vec![];
     file.read_to_end(&mut bytes).await?;
 

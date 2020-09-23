@@ -8,13 +8,14 @@ use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::DNS;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use std::env;
 use std::str::FromStr;
 
 mod api;
 mod cert;
+mod config;
 mod dns;
 mod domain;
-mod config;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
@@ -22,23 +23,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut runtime = Runtime::new()?;
     SimpleLogger::init(LevelFilter::Debug, Config::default())?;
 
-    let config = runtime.block_on(config::config())?;
-    println!("{:?}", config);
+    let config_path = env::args().skip(1).next();
+    let config = runtime.block_on(config::config(config_path))?;
 
-    let pool = runtime.block_on(setup_database())?;
+    let pool = runtime.block_on(setup_database(&config.general.db))?;
 
     let dns = runtime
-        .block_on(DNS::builder(config.general.listen))?
+        .block_on(DNS::builder(config.general.dns))?
         .build(pool.clone(), &runtime);
 
-    let https = format!("{}:{}", config.api.ip, config.api.port);
     let api = runtime.block_on(Api::new(
-        Some("0.0.0.0:8080"),
-        Some(&https),
+        config.api.http.as_deref(),
+        config.api.https.as_deref(),
         pool.clone(),
     ))?;
 
-    let cert_manager = CertManager::new(pool);
+    let cert_manager = CertManager::new(pool, config.general.acme);
 
     runtime.block_on(
         async move { tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn()) },
@@ -47,9 +47,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn setup_database() -> Result<PgPool, sqlx::Error> {
-    let options =
-        PgConnectOptions::from_str("postgresql://postgres:mysecretpassword@localhost/postgres")?;
+async fn setup_database(db: &str) -> Result<PgPool, sqlx::Error> {
+    let options = PgConnectOptions::from_str(db)?;
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect_with(options)
