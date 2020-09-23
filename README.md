@@ -7,7 +7,6 @@ It aims to be API compatible with the original implementation.
 
 ## Configuration
 By default a configuration file is expected in the working directory with the name config.toml .
-It is possible to pass a diferent path as the first argument to the executable.
 
 **Example config:**
 ```toml
@@ -19,4 +18,9 @@ acme = "https://acme-staging-v02.api.letsencrypt.org/directory"
 [api]
 http = "0.0.0.0:8080"
 https = "0.0.0.0:8081"
+```
+
+It is possible to pass a diferent path as the first argument to the executable.
+```bash
+./acme-dns-rust different_name.toml
 ```

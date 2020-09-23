@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pool = runtime.block_on(setup_database(&config.general.db))?;
 
     let dns = runtime
-        .block_on(DNS::builder(config.general.dns))?
+        .block_on(DNS::builder(&config.general.dns))?
         .build(pool.clone(), &runtime);
 
     let api = runtime.block_on(Api::new(
