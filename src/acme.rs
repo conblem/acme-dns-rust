@@ -11,8 +11,11 @@ pub struct DatabasePersist {
 }
 
 impl DatabasePersist {
-    pub fn new(pool: Pool<Postgres>, handle: Handle) -> Self {
-        DatabasePersist { pool, handle }
+    pub fn new(pool: Pool<Postgres>, handle: &Handle) -> Self {
+        DatabasePersist {
+            pool,
+            handle: handle.clone(),
+        }
     }
 }
 

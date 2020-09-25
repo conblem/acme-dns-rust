@@ -28,10 +28,6 @@ impl Default for Domain {
 pub struct DomainFacade {}
 
 impl DomainFacade {
-    pub fn new() -> Self {
-        DomainFacade {}
-    }
-
     pub async fn find_by_id<'a, E: Executor<'a, Database = Postgres>>(
         executor: E,
         id: &str,

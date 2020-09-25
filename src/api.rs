@@ -128,7 +128,7 @@ pub struct Api {
 }
 
 async fn register(pool: PgPool, domain: Domain) -> Result<reply::Response, Rejection> {
-    let domain = match DomainFacade::create_domain(&pool, &domain).await {
+    let _domain = match DomainFacade::create_domain(&pool, &domain).await {
         Err(e) => {
             return Ok(Response::builder()
                 .status(500)

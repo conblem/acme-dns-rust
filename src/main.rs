@@ -1,3 +1,4 @@
+use futures_util::TryFutureExt;
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -11,7 +12,6 @@ use crate::acme::DatabasePersist;
 use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::DNS;
-use futures_util::TryFutureExt;
 
 mod acme;
 mod api;
@@ -22,11 +22,20 @@ mod domain;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
-fn main() -> Result<(), Box<dyn Error>> {
-    SimpleLogger::init(LevelFilter::Debug, Config::default())?;
+fn main() {
+    SimpleLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
+    if let Err(e) = run() {
+        log::error!("{}", e);
+        panic!("{}", e);
+    }
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     let runtime = Runtime::new()?;
-    runtime.handle().clone().block_on(async move {
+    // Async closure cannot be move, if runtime gets moved into it
+    // it gets dropped inside an async call
+    runtime.handle().clone().block_on(async {
         let config_path = env::args().skip(1).next();
         let config = config::config(config_path).await?;
 
@@ -41,10 +50,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map_err(From::from)
         .and_then(Api::spawn);
 
-        let handle = runtime.handle().clone();
-        let persist = DatabasePersist::new(pool.clone(), handle);
-        let cert_manager = CertManager::new(pool, persist, config.general.acme)
-            .and_then(CertManager::spawn);
+        let persist = DatabasePersist::new(pool.clone(), runtime.handle());
+        let cert_manager =
+            CertManager::new(pool, persist, config.general.acme).and_then(CertManager::spawn);
 
         tokio::try_join!(api, cert_manager, dns.spawn())?;
 
