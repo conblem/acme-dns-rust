@@ -39,12 +39,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             pool.clone(),
         )
         .map_err(From::from)
-        .and_then(|api| api.spawn());
+        .and_then(Api::spawn);
 
         let handle = runtime.handle().clone();
         let persist = DatabasePersist::new(pool.clone(), handle);
         let cert_manager = CertManager::new(pool, persist, config.general.acme)
-            .and_then(|cert_manager| cert_manager.spawn());
+            .and_then(CertManager::spawn);
 
         tokio::try_join!(api, cert_manager, dns.spawn())?;
 
