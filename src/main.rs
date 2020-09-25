@@ -11,6 +11,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::env;
 use std::str::FromStr;
 
+mod acme;
 mod api;
 mod cert;
 mod config;
