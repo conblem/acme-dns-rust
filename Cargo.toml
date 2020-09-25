@@ -11,16 +11,16 @@ log = "0.4"
 sqlx = { version = "0.4.0-beta.1", default-features = false, features = [ "runtime-tokio", "macros", "postgres", "mysql", "any", "migrate", "chrono" ] }
 tokio = { version = "0.2", features = ["full"] }
 uuid = { version = "0.8", features = ["v4"] }
-simplelog = "^0.7.6"
-bcrypt = "0.8.1"
-warp = { version = "0.2.4", default-features = false }
+simplelog = "0.7"
+bcrypt = "0.8"
+warp = { version = "0.2", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
-acme-lib = "0.8.1"
-trust-dns-server = "0.19.5"
-trust-dns-client = "0.19.5"
-parking_lot = "0.11.0"
-futures-util = "0.3.5"
+acme-lib = "0.8"
+trust-dns-server = "0.19"
+trust-dns-client = "0.19"
+parking_lot = "0.11"
+futures-util = "0.3"
 rustls = "0.18"
 tokio-rustls = "0.14"
 toml = "0.5"
