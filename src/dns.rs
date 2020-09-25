@@ -116,34 +116,31 @@ impl DatabaseAuthority {
     }
 }
 
-pub struct DNS {
+pub struct DNS<'a, A> {
     server: ServerFuture<Catalog>,
+    addr: A,
+    runtime: &'a Runtime
 }
 
-impl DNS {
-    pub async fn builder<A: ToSocketAddrs>(addr: A) -> tokio::io::Result<DNSBuilder> {
-        let udp = UdpSocket::bind(addr).await?;
-
-        Ok(DNSBuilder(udp))
-    }
-
-    pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
-        tokio::spawn(self.server.block_until_done()).await??;
-
-        Ok(())
-    }
-}
-
-pub struct DNSBuilder(UdpSocket);
-
-impl DNSBuilder {
-    pub fn build(self, pool: PgPool, runtime: &Runtime) -> DNS {
+impl <'a, A: ToSocketAddrs> DNS<'a, A> {
+    pub fn new(pool: PgPool, addr: A, runtime: &'a Runtime) -> Self {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
         catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));
-        let mut server = ServerFuture::new(catalog);
-        server.register_socket(self.0, runtime);
+        let server = ServerFuture::new(catalog);
+        DNS {
+            server,
+            addr,
+            runtime
+        }
+    }
 
-        DNS { server }
+    pub async fn spawn(mut self) -> Result<(), Box<dyn Error>> {
+        let udp = UdpSocket::bind(self.addr).await?;
+        self.server.register_socket(udp, self.runtime);
+
+        tokio::spawn(self.server.block_until_done()).await??;
+
+        Ok(())
     }
 }

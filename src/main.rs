@@ -22,26 +22,23 @@ mod domain;
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut runtime = Runtime::new()?;
     SimpleLogger::init(LevelFilter::Debug, Config::default())?;
 
-    let config_path = env::args().skip(1).next();
-    let config = runtime.block_on(config::config(config_path))?;
+    let runtime = Runtime::new()?;
+    runtime.handle().clone().block_on(async move {
+        let config_path = env::args().skip(1).next();
+        let config = config::config(config_path).await?;
 
-    let pool = runtime.block_on(setup_database(&config.general.db))?;
+        let pool = setup_database(&config.general.db).await?;
+        let dns = DNS::new(pool.clone(), &config.general.dns, &runtime);
 
-    let dns = runtime
-        .block_on(DNS::builder(&config.general.dns))?
-        .build(pool.clone(), &runtime);
-
-    let handle = runtime.handle().clone();
-    runtime.block_on(async move {
         let api = Api::new(
             config.api.http.as_deref(),
             config.api.https.as_deref(),
             pool.clone(),
         ).await?;
 
+        let handle = runtime.handle().clone();
         let persist = DatabasePersist::new(pool.clone(), handle);
         let cert_manager = CertManager::new(pool, persist, config.general.acme).await?;
         tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn())?;
