@@ -119,10 +119,10 @@ impl DatabaseAuthority {
 pub struct DNS<'a, A> {
     server: ServerFuture<Catalog>,
     addr: A,
-    runtime: &'a Runtime
+    runtime: &'a Runtime,
 }
 
-impl <'a, A: ToSocketAddrs> DNS<'a, A> {
+impl<'a, A: ToSocketAddrs> DNS<'a, A> {
     pub fn new(pool: PgPool, addr: A, runtime: &'a Runtime) -> Self {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
@@ -131,7 +131,7 @@ impl <'a, A: ToSocketAddrs> DNS<'a, A> {
         DNS {
             server,
             addr,
-            runtime
+            runtime,
         }
     }
 

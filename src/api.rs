@@ -132,7 +132,7 @@ async fn register(pool: PgPool, domain: Domain) -> Result<reply::Response, Rejec
         Err(e) => {
             return Ok(Response::builder()
                 .status(500)
-                .body("")
+                .body(e.to_string())
                 .unwrap()
                 .into_response())
         }

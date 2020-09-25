@@ -178,9 +178,14 @@ impl CertManager {
             let mut interval = CertManager::interval();
             loop {
                 interval.tick().await;
-                if false {
-                    self.test().await;
+                if true {
+                    continue;
                 }
+                if let Err(e) = self.test().await {
+                    log::error!("{}", e);
+                    continue;
+                }
+                log::info!("Interval successfully passed");
             }
         })
         .await?;

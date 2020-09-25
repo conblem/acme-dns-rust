@@ -1,16 +1,16 @@
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use sqlx::migrate::Migrator;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
+use std::env;
 use std::error::Error;
+use std::str::FromStr;
 use tokio::runtime::Runtime;
 
 use crate::acme::DatabasePersist;
 use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::DNS;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use std::env;
-use std::str::FromStr;
 
 mod acme;
 mod api;
@@ -36,11 +36,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             config.api.http.as_deref(),
             config.api.https.as_deref(),
             pool.clone(),
-        ).await?;
+        )
+        .await?;
 
         let handle = runtime.handle().clone();
         let persist = DatabasePersist::new(pool.clone(), handle);
         let cert_manager = CertManager::new(pool, persist, config.general.acme).await?;
+
         tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn())?;
 
         Ok(())
