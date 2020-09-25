@@ -34,20 +34,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         .block_on(DNS::builder(&config.general.dns))?
         .build(pool.clone(), &runtime);
 
-    let api = runtime.block_on(Api::new(
-        config.api.http.as_deref(),
-        config.api.https.as_deref(),
-        pool.clone(),
-    ))?;
+    let handle = runtime.handle().clone();
+    runtime.block_on(async move {
+        let api = Api::new(
+            config.api.http.as_deref(),
+            config.api.https.as_deref(),
+            pool.clone(),
+        ).await?;
 
-    let persist = DatabasePersist::new(pool.clone(), runtime.handle());
-    let cert_manager = CertManager::new(pool, persist, config.general.acme)?;
+        let persist = DatabasePersist::new(pool.clone(), handle);
+        let cert_manager = CertManager::new(pool, persist, config.general.acme).await?;
+        tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn())?;
 
-    runtime.block_on(
-        async move { tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn()) },
-    )?;
-
-    Ok(())
+        Ok(())
+    })
 }
 
 async fn setup_database(db: &str) -> Result<PgPool, sqlx::Error> {

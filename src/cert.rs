@@ -144,12 +144,17 @@ pub struct CertManager {
 }
 
 impl CertManager {
-    pub fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> acme_lib::Result<Self> {
-        let directory = Directory::from_url(persist, DirectoryUrl::Other(&acme))?;
-        Ok(CertManager {
-            pool,
-            directory: directory,
+    pub async fn new(
+        pool: PgPool,
+        persist: DatabasePersist,
+        acme: String,
+    ) -> Result<Self, Box<dyn Error>> {
+        let directory = tokio::task::spawn_blocking(move || {
+            Directory::from_url(persist, DirectoryUrl::Other(&acme))
         })
+        .await??;
+
+        Ok(CertManager { pool, directory })
     }
 
     fn interval() -> Interval {
