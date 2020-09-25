@@ -188,7 +188,7 @@ impl CertManager {
             .await
             .ok_or_else(|| other_error("Cert not found"))?;
 
-        //improve
+        // todo: improve
         let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await
             .expect("must have in sql");
