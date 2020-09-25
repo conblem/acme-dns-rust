@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use std::error::Error;
 use tokio::runtime::Runtime;
 
+use crate::acme::DatabasePersist;
 use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::DNS;
@@ -39,7 +40,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         pool.clone(),
     ))?;
 
-    let cert_manager = CertManager::new(pool, config.general.acme);
+    let persist = DatabasePersist::new(pool.clone(), runtime.handle());
+    let cert_manager = CertManager::new(pool, persist, config.general.acme)?;
 
     runtime.block_on(
         async move { tokio::try_join!(cert_manager.spawn(), dns.spawn(), api.spawn()) },

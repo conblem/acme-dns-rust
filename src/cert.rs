@@ -1,13 +1,13 @@
-use acme_lib::persist::MemoryPersist;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use chrono::{DateTime, Duration, Local};
 use sqlx::{Executor, FromRow, PgPool, Postgres, Type};
+use std::error::Error;
+use std::io::ErrorKind;
 use tokio::time::Interval;
 use uuid::Uuid;
 
+use crate::acme::DatabasePersist;
 use crate::domain::{Domain, DomainFacade};
-use std::error::Error;
-use std::io::ErrorKind;
 
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[repr(i32)]
@@ -137,14 +137,19 @@ impl CertFacade {
     }
 }
 
+#[derive(Clone)]
 pub struct CertManager {
     pool: PgPool,
-    acme: String,
+    directory: Directory<DatabasePersist>,
 }
 
 impl CertManager {
-    pub fn new(pool: PgPool, acme: String) -> Self {
-        CertManager { pool, acme }
+    pub fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> acme_lib::Result<Self> {
+        let directory = Directory::from_url(persist, DirectoryUrl::Other(&acme))?;
+        Ok(CertManager {
+            pool,
+            directory: directory,
+        })
     }
 
     fn interval() -> Interval {
@@ -168,7 +173,9 @@ impl CertManager {
             let mut interval = CertManager::interval();
             loop {
                 interval.tick().await;
-                //self.test().await;
+                if false {
+                    self.test().await;
+                }
             }
         })
         .await?;
@@ -186,9 +193,9 @@ impl CertManager {
             .await
             .expect("must have in sql");
 
-        let dir = Directory::from_url(MemoryPersist::new(), DirectoryUrl::Other(&self.acme))?;
+        let directory = self.directory.clone();
         let mut order = tokio::task::spawn_blocking(move || {
-            let account = dir.account("acme-dns-rust@byom.de")?;
+            let account = directory.account("acme-dns-rust@byom.de")?;
             account.new_order("acme.wehrli.ml", &[])
         })
         .await??;
