@@ -27,6 +27,10 @@ fn persist_kind(kind: &PersistKind) -> &str {
     }
 }
 
+fn to_i64(val: &u64) -> i64 {
+    i64::from_ne_bytes(val.to_ne_bytes())
+}
+
 impl Persist for DatabasePersist {
     fn put<'a>(&self, key: &PersistKey<'a>, value: &[u8]) -> acme_lib::Result<()> {
         let PersistKey { realm, kind, key } = key;
@@ -35,7 +39,7 @@ impl Persist for DatabasePersist {
             .block_on(
                 sqlx::query("INSERT INTO acme (key, realm, kind, value) VALUES ($1, $2, $3, $4)")
                     .bind(key)
-                    .bind(*realm as i64)
+                    .bind(to_i64(realm))
                     .bind(persist_kind(kind))
                     .bind(value)
                     .execute(&self.pool),
@@ -51,7 +55,7 @@ impl Persist for DatabasePersist {
         let mut rows =
             sqlx::query("SELECT (value) FROM acme WHERE key = $1, realm = $2, kind = $3 LIMIT 1")
                 .bind(key)
-                .bind(*realm as i64)
+                .bind(to_i64(realm))
                 .bind(persist_kind(kind))
                 .fetch(&self.pool);
 
