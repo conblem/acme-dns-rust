@@ -74,12 +74,12 @@ impl DatabaseAuthority {
     }
 
     fn lookup_pre(&self, name: &Name, query_type: &RecordType) -> Option<LookupRecords> {
-        self.records
-            .get(name)
-            .map(|x| x.get(query_type))
-            .flatten()
-            .map(Arc::clone)
-            .map(|record_set| LookupRecords::new(false, SupportedAlgorithms::new(), record_set))
+        let record_set = Arc::clone(self.records.get(name)?.get(query_type)?);
+        Some(LookupRecords::new(
+            false,
+            SupportedAlgorithms::new(),
+            record_set,
+        ))
     }
 }
 
