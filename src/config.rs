@@ -1,7 +1,8 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::error::Error;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use std::fs::File;
+use std::io::Read;
 
 #[derive(Deserialize, Debug)]
 pub struct Api {
@@ -19,21 +20,25 @@ pub struct General {
     pub db: String,
     #[serde(default = "default_acme")]
     pub acme: String,
+    pub name: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub general: General,
     pub api: Api,
+    pub records: HashMap<String, Vec<(String, String)>>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "config.toml";
 
-pub async fn config(config_path: Option<String>) -> Result<Config, Box<dyn Error>> {
+pub fn config(config_path: Option<String>) -> Result<Config, Box<dyn Error>> {
     let config_path = config_path.as_deref().unwrap_or(DEFAULT_CONFIG_PATH);
-    let mut file = File::open(config_path).await?;
+    let mut file = File::open(config_path)?;
     let mut bytes = vec![];
-    file.read_to_end(&mut bytes).await?;
+    file.read_to_end(&mut bytes)?;
 
-    Ok(toml::de::from_slice::<Config>(&bytes)?)
+    let config = toml::de::from_slice::<Config>(&bytes)?;
+    log::info!("config loaded {:?}", config);
+    Ok(config)
 }

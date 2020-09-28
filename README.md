@@ -14,6 +14,7 @@ By default a configuration file is expected in the working directory with the na
 dns = "0.0.0.0:8053"
 db = "postgresql://postgres:mysecretpassword@localhost/postgres"
 acme = "https://acme-staging-v02.api.letsencrypt.org/directory"
+name = "acme.example.com"
 
 [api]
 http = "0.0.0.0:8080"

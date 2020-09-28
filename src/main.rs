@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 use crate::acme::DatabasePersist;
 use crate::api::Api;
 use crate::cert::CertManager;
-use crate::dns::DNS;
+use crate::dns::{DatabaseAuthority, DNS};
 
 mod acme;
 mod api;
@@ -32,15 +32,16 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
+    let config_path = env::args().skip(1).next();
+    let config = config::config(config_path)?;
+
     let runtime = Runtime::new()?;
     // Async closure cannot be move, if runtime gets moved into it
     // it gets dropped inside an async call
     runtime.handle().clone().block_on(async {
-        let config_path = env::args().skip(1).next();
-        let config = config::config(config_path).await?;
-
         let pool = setup_database(&config.general.db).await?;
-        let dns = DNS::new(pool.clone(), &config.general.dns, &runtime);
+        let authority = DatabaseAuthority::new(pool.clone(), config.general.name, config.records);
+        let dns = DNS::new(&config.general.dns, &runtime, authority);
 
         let api = Api::new(
             config.api.http.as_deref(),

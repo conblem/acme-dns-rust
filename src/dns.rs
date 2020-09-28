@@ -17,11 +17,70 @@ use trust_dns_server::ServerFuture;
 
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
+use futures_util::StreamExt;
+use std::collections::HashMap;
 use std::error::Error;
+use std::str::FromStr;
+use trust_dns_server::proto::rr::record_data::RData::A;
 
-struct DatabaseAuthority {
+// use result instead of error
+fn parse_record((name, (record_type, value)): (String, (String, String))) -> Option<Record> {
+    let name = match Name::from_str(&name).ok() {
+        None => return None,
+        Some(name) => name,
+    };
+
+    match record_type.as_ref() {
+        "TXT" => {
+            let txt = TXT::new(vec![value]);
+            Some(Record::from_rdata(name, 100, RData::TXT(txt)))
+        }
+        "A" => value
+            .parse()
+            .ok()
+            .map(|ip| Record::from_rdata(name, 100, RData::A(ip))),
+        _ => None,
+    }
+}
+
+fn parse(records: HashMap<String, Vec<(String, String)>>) -> HashMap<String, String> {
+    records
+        .into_iter()
+        .map(|(name, records)| ("test".to_string(), "test".to_string()))
+        .collect()
+}
+
+pub struct DatabaseAuthority {
     lower: LowerName,
     pool: PgPool,
+    name: String,
+    records: Arc<HashMap<Name, HashMap<RecordType, Arc<RecordSet>>>>,
+}
+
+impl DatabaseAuthority {
+    pub fn new(
+        pool: PgPool,
+        name: String,
+        records: HashMap<String, Vec<(String, String)>>,
+    ) -> Self {
+        let lower = LowerName::from(Name::root());
+
+        DatabaseAuthority {
+            lower,
+            pool,
+            name,
+            records: Default::default(),
+        }
+    }
+
+    fn lookup_pre(&self, name: &Name, query_type: &RecordType) -> Option<LookupRecords> {
+        self.records
+            .get(name)
+            .map(|x| x.get(query_type))
+            .flatten()
+            .map(Arc::clone)
+            .map(|record_set| LookupRecords::new(false, SupportedAlgorithms::new(), record_set))
+    }
 }
 
 #[allow(dead_code)]
@@ -61,31 +120,34 @@ impl Authority for DatabaseAuthority {
         _is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
     ) -> Self::LookupFuture {
-        let name = Name::from(query.name());
-
-        if RecordType::TXT != query.query_type() || name.len() == 0 {
-            return Box::pin(async { Ok(LookupRecords::Empty) });
-        }
-
-        let first = name[0].to_string();
         let pool = self.pool.clone();
+        let name = Name::from(query.name());
+        let query_type = query.query_type();
+        let pre = self.lookup_pre(&name, &query_type);
 
-        if first == "_acme-challenge" {
-            return Box::pin(async move {
+        Box::pin(async move {
+            if let Some(pre) = pre {
+                return Ok(pre);
+            }
+
+            if RecordType::TXT != query_type || name.len() == 0 {
+                return Ok(LookupRecords::Empty);
+            }
+
+            let first = name[0].to_string();
+            if first == "_acme-challenge" {
                 let cert = CertFacade::first_cert(&pool).await.expect("always exists");
                 let domain = DomainFacade::find_by_id(&pool, &cert.domain)
                     .await
                     .expect("always exists");
 
-                //use match
+                //use match txt can be empty
                 let txt = TXT::new(vec![domain.txt.unwrap()]);
                 let record = Record::from_rdata(name, 100, RData::TXT(txt));
                 let record = Arc::new(RecordSet::from(record));
-                Ok(LookupRecords::new(false, supported_algorithms, record))
-            });
-        }
+                return Ok(LookupRecords::new(false, supported_algorithms, record));
+            }
 
-        Box::pin(async move {
             match DomainFacade::find_by_id(&pool, &first).await {
                 Some(Domain { txt: Some(txt), .. }) => {
                     let txt = TXT::new(vec![txt]);
@@ -108,14 +170,6 @@ impl Authority for DatabaseAuthority {
     }
 }
 
-impl DatabaseAuthority {
-    fn new(pool: PgPool) -> Self {
-        let lower = LowerName::from(Name::root());
-
-        DatabaseAuthority { lower, pool }
-    }
-}
-
 pub struct DNS<'a, A> {
     server: ServerFuture<Catalog>,
     addr: A,
@@ -123,10 +177,10 @@ pub struct DNS<'a, A> {
 }
 
 impl<'a, A: ToSocketAddrs> DNS<'a, A> {
-    pub fn new(pool: PgPool, addr: A, runtime: &'a Runtime) -> Self {
+    pub fn new(addr: A, runtime: &'a Runtime, authority: DatabaseAuthority) -> Self {
         let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
-        catalog.upsert(root, Box::new(DatabaseAuthority::new(pool)));
+        catalog.upsert(root, Box::new(authority));
         let server = ServerFuture::new(catalog);
         DNS {
             server,
