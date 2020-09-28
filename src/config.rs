@@ -27,7 +27,7 @@ pub struct General {
 pub struct Config {
     pub general: General,
     pub api: Api,
-    pub records: HashMap<String, Vec<(String, String)>>,
+    pub records: HashMap<String, Vec<Vec<String>>>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "config.toml";

@@ -19,35 +19,47 @@ use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
 use futures_util::StreamExt;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::error::Error;
 use std::str::FromStr;
 use trust_dns_server::proto::rr::record_data::RData::A;
 
 // use result instead of error
-fn parse_record((name, (record_type, value)): (String, (String, String))) -> Option<Record> {
-    let name = match Name::from_str(&name).ok() {
-        None => return None,
-        Some(name) => name,
+fn parse_record(
+    name: &Name,
+    record_type: &str,
+    ttl: u32,
+    mut value: Vec<String>,
+) -> Option<RecordSet> {
+    let record = match record_type {
+        "TXT" => |val: String| Some(RData::TXT(TXT::new(vec![val]))),
+        "A" => |val: String| Some(RData::A(val.parse().ok()?)),
+        _ => return None,
     };
 
-    match record_type.as_ref() {
-        "TXT" => {
-            let txt = TXT::new(vec![value]);
-            Some(Record::from_rdata(name, 100, RData::TXT(txt)))
-        }
-        "A" => value
-            .parse()
-            .ok()
-            .map(|ip| Record::from_rdata(name, 100, RData::A(ip))),
-        _ => None,
+    let mut iter = value.into_iter().flat_map(record);
+
+    let mut record_set = RecordSet::from(Record::from_rdata(name.clone(), ttl, iter.next()?));
+    for record in iter {
+        record_set.add_rdata(record);
     }
+
+    Some(record_set)
 }
 
-fn parse(records: HashMap<String, Vec<(String, String)>>) -> HashMap<String, String> {
-    records
-        .into_iter()
-        .map(|(name, records)| ("test".to_string(), "test".to_string()))
-        .collect()
+fn parse(records: HashMap<String, Vec<Vec<String>>>) -> Option<HashMap<Name, HashMap<RecordType, RecordSet>>> {
+    let result = Default::default();
+    for (name, val) in records {
+        let name = Name::from_str(&name).ok()?;
+        for val in val {
+            let mut iter = val.into_iter();
+            let record_type = iter.next()?;
+            let ttl = iter.next()?.parse().ok()?;
+            let record_set = parse_record(&name, &record_type, ttl, iter.collect())?;
+        }
+    }
+
+    Some(result)
 }
 
 pub struct DatabaseAuthority {
@@ -58,11 +70,7 @@ pub struct DatabaseAuthority {
 }
 
 impl DatabaseAuthority {
-    pub fn new(
-        pool: PgPool,
-        name: String,
-        records: HashMap<String, Vec<(String, String)>>,
-    ) -> Self {
+    pub fn new(pool: PgPool, name: String, records: HashMap<String, Vec<Vec<String>>>) -> Self {
         let lower = LowerName::from(Name::root());
 
         DatabaseAuthority {
