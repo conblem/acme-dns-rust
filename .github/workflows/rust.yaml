@@ -21,7 +21,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin/cross
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Login to Github Docker
@@ -32,8 +31,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: docker pull docker.pkg.github.com/conblem/acme-dns-rust/musl
       - name: Install cross
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: cargo install cross
+        uses: actions-rs/install@v0.1
+        with:
+          crate: cross
+          version: latest
+          use-tool-cache: true
       - run: cross build --target x86_64-unknown-linux-musl --release
       - name: Annotate commit with clippy warnings
         uses: actions-rs/clippy-check@v1
