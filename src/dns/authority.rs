@@ -84,7 +84,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
 
     if record_set.is_empty() {
         log::debug!("dns lookup returned no ipv4 records");
-        return Err(LookupError::ResponseCode(ResponseCode::ServFail))
+        return Err(LookupError::ResponseCode(ResponseCode::ServFail));
     }
 
     Ok(Arc::new(record_set))
