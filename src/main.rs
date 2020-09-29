@@ -23,7 +23,7 @@ mod domain;
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
 fn main() {
-    SimpleLogger::init(LevelFilter::Debug, Config::default()).unwrap();
+    SimpleLogger::init(LevelFilter::Info, Config::default()).unwrap();
 
     if let Err(e) = run() {
         log::error!("{}", e);

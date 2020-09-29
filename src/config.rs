@@ -39,6 +39,10 @@ pub fn config(config_path: Option<String>) -> Result<Config, Box<dyn Error>> {
     file.read_to_end(&mut bytes)?;
 
     let config = toml::de::from_slice::<Config>(&bytes)?;
-    log::info!("config loaded {:?}", config);
+
+    // redact db information
+    let config_str = format!("{:?}", config).replace(&config.general.db, "******");
+    log::info!("Loaded {}", config_str);
+
     Ok(config)
 }
