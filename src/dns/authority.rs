@@ -5,12 +5,14 @@ use std::future::Future;
 use std::io;
 use std::net::IpAddr::V4;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use trust_dns_client::op::LowerQuery;
 use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
     Authority, LookupError, LookupRecords, MessageRequest, UpdateResult, ZoneType,
 };
+use trust_dns_server::proto::op::ResponseCode;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::record_data::RData;
@@ -19,8 +21,6 @@ use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 use super::parse::parse;
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
-use std::str::FromStr;
-use trust_dns_server::proto::op::ResponseCode;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 
