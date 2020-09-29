@@ -67,8 +67,8 @@ impl Acceptor {
         Ok(Arc::new(config))
     }
 
-    async fn load_cert(&self) -> Result<TlsAcceptor, std::io::Error> {
-        let new_cert = CertFacade::first_cert(&self.pool).await;
+    async fn load_cert(&self) -> Result<TlsAcceptor, Box<dyn Error + Send + Sync>> {
+        let new_cert = CertFacade::first_cert(&self.pool).await?;
 
         // could probably be improved
         let mut db_cert = match (new_cert, self.config.read().deref()) {
@@ -100,7 +100,7 @@ impl Https {
         self,
     ) -> impl TryStream<
         Ok = impl AsyncRead + AsyncWrite + Send + 'static + Unpin,
-        Error = impl Into<Box<dyn std::error::Error + Send + Sync>>,
+        Error = Box<dyn std::error::Error + Send + Sync>,
     > + Send {
         let acceptor = Acceptor::new(self.pool);
         let acceptor_stream = futures_util::stream::unfold(acceptor, |acc| async {
@@ -111,9 +111,9 @@ impl Https {
             .zip(acceptor_stream)
             .then(|item| async move {
                 match item {
-                    (Ok(stream), Ok(acceptor)) => acceptor.accept(stream).await,
-                    (Err(e), _) => Err(e),
-                    (_, Err(e)) => Err(e),
+                    (Ok(stream), Ok(acceptor)) => Ok(acceptor.accept(stream).await?),
+                    (Err(e), _) => Err(e)?,
+                    (_, Err(e)) => Err(e)?,
                 }
             })
             .inspect_err(|err| error!("Stream error: {}", err))

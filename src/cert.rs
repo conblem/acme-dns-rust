@@ -49,17 +49,21 @@ impl Cert {
 pub struct CertFacade {}
 
 impl CertFacade {
-    pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E) -> Option<Cert>
+    pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(
+        executor: E,
+    ) -> Result<Option<Cert>, sqlx::Error>
     where
         DateTime<Local>: Type<Postgres>,
     {
         sqlx::query_as("SELECT * FROM cert LIMIT 1")
             .fetch_optional(executor)
             .await
-            .unwrap()
     }
 
-    async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
+    async fn update_cert<'a, E: Executor<'a, Database = Postgres>>(
+        executor: E,
+        cert: &Cert,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE cert SET update = $1, state = $2, cert = $3, private = $4, domain_id = $5 WHERE id = $6")
             .bind(&cert.update)
             .bind(&cert.state)
@@ -68,11 +72,12 @@ impl CertFacade {
             .bind(&cert.domain)
             .bind(&cert.id)
             .execute(executor)
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
-    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) {
+    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) -> Result<(), sqlx::Error> {
         sqlx::query("INSERT INTO cert (id, update, state, cert, private, domain_id) VALUES ($1, $2, $3, $4, $5, $6)")
             .bind(&cert.id)
             .bind(&cert.update)
@@ -81,19 +86,20 @@ impl CertFacade {
             .bind(&cert.private)
             .bind(&cert.domain)
             .execute(executor)
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
-    pub async fn start(pool: &PgPool) -> Option<Cert> {
-        let mut transaction = pool.begin().await.unwrap();
+    pub async fn start(pool: &PgPool) -> Result<Option<Cert>, sqlx::Error> {
+        let mut transaction = pool.begin().await?;
 
-        let cert = CertFacade::first_cert(&mut transaction).await;
+        let cert = CertFacade::first_cert(&mut transaction).await?;
 
         let cert = match cert {
             Some(mut cert) if cert.state == State::Ok => {
                 cert.state = State::Updating;
-                CertFacade::update_cert(&mut transaction, &cert).await;
+                CertFacade::update_cert(&mut transaction, &cert).await?;
                 Some(cert)
             }
             Some(mut cert) => {
@@ -101,7 +107,7 @@ impl CertFacade {
                 if cert.update < one_hour_ago {
                     cert.update = Local::now();
                     cert.state = State::Updating;
-                    CertFacade::update_cert(&mut transaction, &cert).await;
+                    CertFacade::update_cert(&mut transaction, &cert).await?;
                     Some(cert)
                 } else {
                     None
@@ -111,29 +117,30 @@ impl CertFacade {
                 let domain = Domain::default();
                 let cert = Cert::new(&domain);
 
-                DomainFacade::create_domain(&mut transaction, &domain).await;
-                CertFacade::create_cert(&mut transaction, &cert).await;
+                DomainFacade::create_domain(&mut transaction, &domain).await?;
+                CertFacade::create_cert(&mut transaction, &cert).await?;
                 Some(cert)
             }
         };
 
         transaction.commit().await.unwrap();
 
-        cert
+        Ok(cert)
     }
 
-    pub async fn stop(pool: &PgPool, mut memory_cert: Cert) {
-        let mut transaction = pool.begin().await.unwrap();
+    pub async fn stop(pool: &PgPool, mut memory_cert: Cert) -> Result<(), sqlx::Error> {
+        let mut transaction = pool.begin().await?;
 
-        match CertFacade::first_cert(&mut transaction).await {
+        match CertFacade::first_cert(&mut transaction).await? {
             Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
                 memory_cert.state = State::Ok;
-                CertFacade::update_cert(pool, &memory_cert).await;
+                CertFacade::update_cert(pool, &memory_cert).await?;
             }
             _ => {}
         }
 
-        transaction.commit().await.unwrap();
+        transaction.commit().await?;
+        Ok(())
     }
 }
 
@@ -195,12 +202,12 @@ impl CertManager {
 
     async fn test(&self) -> Result<(), Box<dyn Error>> {
         let mut memory_cert = CertFacade::start(&self.pool)
-            .await
+            .await?
             .ok_or_else(|| other_error("Cert not found"))?;
 
         // todo: improve
         let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
-            .await
+            .await?
             .expect("must have in sql");
 
         let directory = self.directory.clone();
@@ -222,7 +229,7 @@ impl CertManager {
 
         //error handling
         let cert = tokio::task::spawn_blocking(move || {
-            call.validate(5000);
+            call.validate(5000)?;
             order.refresh()?;
             // fix
             let ord_csr = order.confirm_validations().unwrap();
@@ -237,7 +244,7 @@ impl CertManager {
 
         memory_cert.cert = Some(cert);
         memory_cert.private = Some(private);
-        CertFacade::stop(&self.pool, memory_cert).await;
+        CertFacade::stop(&self.pool, memory_cert).await?;
 
         Ok(())
     }

@@ -31,12 +31,11 @@ impl DomainFacade {
     pub async fn find_by_id<'a, E: Executor<'a, Database = Postgres>>(
         executor: E,
         id: &str,
-    ) -> Option<Domain> {
+    ) -> Result<Option<Domain>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM domain WHERE id = $1 LIMIT 1")
             .bind(id)
             .fetch_optional(executor)
             .await
-            .unwrap()
     }
 
     pub async fn create_domain<'a, E: Executor<'a, Database = Postgres>>(

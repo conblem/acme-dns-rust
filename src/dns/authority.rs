@@ -2,6 +2,7 @@ use futures_util::FutureExt;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::future::Future;
+use std::io;
 use std::net::IpAddr::V4;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -67,7 +68,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
     // hack tokio expects a socket addr
     let addr = format!("{}:80", cname);
     log::debug!("resolving following cname ip {}", addr);
-    let mut hosts = tokio::net::lookup_host(addr)
+    let hosts = tokio::net::lookup_host(addr)
         .await
         .map_err(|_| LookupError::ResponseCode(ResponseCode::ServFail))?
         .peekable();
@@ -90,18 +91,23 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
 }
 
 impl DatabaseAuthorityInner {
-    async fn lookup_pre(&self, name: &Name, query_type: &RecordType) -> Result<Option<LookupRecords>, LookupError> {
+    async fn lookup_pre(
+        &self,
+        name: &Name,
+        query_type: &RecordType,
+    ) -> Result<Option<LookupRecords>, LookupError> {
         log::debug!("starting prelookup for {}, {}", name, query_type);
         let records = match self.records.get(name) {
             Some(records) => records,
-            None => return Ok(None)
+            None => return Ok(None),
         };
 
         let record_set = match (records.get(query_type), records.get(&RecordType::CNAME)) {
             (Some(record_set), _) => Arc::clone(record_set),
             // if no A Record can be found, see if maybe it is configured as a cname
-            (None, Some(record_set)) if *query_type == RecordType::A =>
-                lookup_cname(record_set).await?,
+            (None, Some(record_set)) if *query_type == RecordType::A => {
+                lookup_cname(record_set).await?
+            }
             (None, _) => Err(LookupError::NameExists)?,
         };
         log::debug!("pre lookup resolved: {:?}", record_set);
@@ -115,10 +121,16 @@ impl DatabaseAuthorityInner {
     async fn acme_challenge(&self, name: Name) -> Result<LookupRecords, LookupError> {
         let pool = &self.pool;
 
-        let cert = CertFacade::first_cert(pool).await.expect("always exists");
-        let domain = DomainFacade::find_by_id(pool, &cert.domain)
-            .await
-            .expect("always exists");
+        let cert = match CertFacade::first_cert(pool).await {
+            Ok(Some(cert)) => cert,
+            Ok(None) => Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound)))?,
+            Err(e) => Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e)))?,
+        };
+        let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
+            Ok(Some(domain)) => domain,
+            Ok(None) => Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound)))?,
+            Err(e) => Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e)))?,
+        };
 
         //use match txt can be empty
         let txt = TXT::new(vec![domain.txt.unwrap()]);
@@ -186,11 +198,13 @@ impl Authority for DatabaseAuthority {
             }
 
             let pool = &authority.pool;
+
             let txt = match DomainFacade::find_by_id(pool, &first).await {
-                Some(Domain { txt: Some(txt), .. }) => txt,
+                Ok(Some(Domain { txt: Some(txt), .. })) => txt,
+                Ok(None) => Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound)))?,
+                Err(e) => Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e)))?,
                 _ => return Ok(LookupRecords::Empty),
             };
-
             let txt = TXT::new(vec![txt]);
             let record = Record::from_rdata(name, 100, RData::TXT(txt));
             let record_set = Arc::new(RecordSet::from(record));
