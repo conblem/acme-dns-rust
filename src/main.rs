@@ -32,7 +32,7 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let config_path = env::args().skip(1).next();
+    let config_path = env::args().nth(1);
     let config = config::config(config_path)?;
 
     let runtime = Runtime::new()?;

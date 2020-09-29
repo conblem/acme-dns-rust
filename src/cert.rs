@@ -77,7 +77,10 @@ impl CertFacade {
         Ok(())
     }
 
-    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(executor: E, cert: &Cert) -> Result<(), sqlx::Error> {
+    async fn create_cert<'a, E: Executor<'a, Database = Postgres>>(
+        executor: E,
+        cert: &Cert,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("INSERT INTO cert (id, update, state, cert, private, domain_id) VALUES ($1, $2, $3, $4, $5, $6)")
             .bind(&cert.id)
             .bind(&cert.update)

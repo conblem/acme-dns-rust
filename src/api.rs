@@ -112,8 +112,8 @@ impl Https {
             .then(|item| async move {
                 match item {
                     (Ok(stream), Ok(acceptor)) => Ok(acceptor.accept(stream).await?),
-                    (Err(e), _) => Err(e)?,
-                    (_, Err(e)) => Err(e)?,
+                    (Err(e), _) => Err(e.into()),
+                    (_, Err(e)) => Err(e),
                 }
             })
             .inspect_err(|err| error!("Stream error: {}", err))

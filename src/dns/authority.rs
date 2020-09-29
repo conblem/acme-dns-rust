@@ -62,7 +62,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
 
     let cname = match records {
         Some(RData::CNAME(cname)) => cname,
-        _ => Err(LookupError::ResponseCode(ResponseCode::ServFail))?,
+        _ => return Err(LookupError::ResponseCode(ResponseCode::ServFail)),
     };
 
     // hack tokio expects a socket addr
@@ -84,7 +84,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
 
     if record_set.is_empty() {
         log::debug!("dns lookup returned no ipv4 records");
-        Err(LookupError::ResponseCode(ResponseCode::ServFail))?
+        return Err(LookupError::ResponseCode(ResponseCode::ServFail))
     }
 
     Ok(Arc::new(record_set))
@@ -108,7 +108,7 @@ impl DatabaseAuthorityInner {
             (None, Some(record_set)) if *query_type == RecordType::A => {
                 lookup_cname(record_set).await?
             }
-            (None, _) => Err(LookupError::NameExists)?,
+            (None, _) => return Err(LookupError::NameExists),
         };
         log::debug!("pre lookup resolved: {:?}", record_set);
         Ok(Some(LookupRecords::new(
@@ -123,13 +123,13 @@ impl DatabaseAuthorityInner {
 
         let cert = match CertFacade::first_cert(pool).await {
             Ok(Some(cert)) => cert,
-            Ok(None) => Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound)))?,
-            Err(e) => Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e)))?,
+            Ok(None) => return Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound))),
+            Err(e) => return Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e))),
         };
         let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
             Ok(Some(domain)) => domain,
-            Ok(None) => Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound)))?,
-            Err(e) => Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e)))?,
+            Ok(None) => return Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound))),
+            Err(e) => return Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e))),
         };
 
         //use match txt can be empty
@@ -187,9 +187,8 @@ impl Authority for DatabaseAuthority {
                 return Ok(LookupRecords::Empty);
             }
 
-            match authority.lookup_pre(&name, &query_type).await? {
-                Some(pre) => return Ok(pre),
-                _ => {}
+            if let Some(pre) = authority.lookup_pre(&name, &query_type).await? {
+                return Ok(pre);
             }
 
             let first = name[0].to_string();
@@ -201,8 +200,8 @@ impl Authority for DatabaseAuthority {
 
             let txt = match DomainFacade::find_by_id(pool, &first).await {
                 Ok(Some(Domain { txt: Some(txt), .. })) => txt,
-                Ok(None) => Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound)))?,
-                Err(e) => Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e)))?,
+                Ok(None) => return Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound))),
+                Err(e) => return Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e))),
                 _ => return Ok(LookupRecords::Empty),
             };
             let txt = TXT::new(vec![txt]);
