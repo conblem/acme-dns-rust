@@ -40,7 +40,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     // it gets dropped inside an async call
     runtime.handle().clone().block_on(async {
         let pool = setup_database(&config.general.db).await?;
-        let authority = DatabaseAuthority::new(pool.clone(), config.general.name, config.records);
+        let authority = DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
         let dns = DNS::new(&config.general.dns, &runtime, authority);
 
         let api = Api::new(

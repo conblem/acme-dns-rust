@@ -19,6 +19,7 @@ fn parse_record(
     };
 
     let mut iter = value.into_iter().flat_map(record);
+    // returns here if iter is empty
     let record = Record::from_rdata(name.clone(), ttl, iter.next()?);
     let mut record_set = RecordSet::from(record);
 

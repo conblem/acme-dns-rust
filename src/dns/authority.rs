@@ -18,13 +18,14 @@ use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 use super::parse::parse;
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
+use std::str::FromStr;
+use trust_dns_server::proto::op::ResponseCode;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 
 struct DatabaseAuthorityInner {
     lower: LowerName,
     pool: PgPool,
-    name: String,
     records: HashMap<Name, HashMap<RecordType, Arc<RecordSet>>>,
     supported_algorithms: SupportedAlgorithms,
 }
@@ -32,17 +33,17 @@ struct DatabaseAuthorityInner {
 impl DatabaseAuthority {
     pub fn new(
         pool: PgPool,
-        name: String,
+        name: &str,
         records: HashMap<String, Vec<Vec<String>>>,
     ) -> Box<DatabaseAuthority> {
-        let lower = LowerName::from(Name::root());
+        // todo: remove unwrap
+        let lower = LowerName::from(Name::from_str(name).unwrap());
         // todo: remove unwrap
         let records = parse(records).unwrap();
 
         let inner = DatabaseAuthorityInner {
             lower,
             pool,
-            name,
             records,
             supported_algorithms: SupportedAlgorithms::new(),
         };
@@ -51,22 +52,25 @@ impl DatabaseAuthority {
     }
 }
 
-async fn lookup_cname(record_set: &RecordSet) -> Option<Arc<RecordSet>> {
+async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupError> {
     let name = record_set.name();
-    let cname = match record_set.records_without_rrsigs().next()?.rdata() {
-        RData::CNAME(cname) => cname,
-        _ => None?,
+    let records = record_set
+        .records_without_rrsigs()
+        .next()
+        .map(Record::rdata);
+
+    let cname = match records {
+        Some(RData::CNAME(cname)) => cname,
+        _ => Err(LookupError::ResponseCode(ResponseCode::ServFail))?,
     };
 
     // hack tokio expects a socket addr
     let addr = format!("{}:80", cname);
     log::debug!("resolving following cname ip {}", addr);
-    let mut hosts = tokio::net::lookup_host(addr).await.ok()?.peekable();
-
-    if hosts.peek().is_none() {
-        log::debug!("empty lookup_host");
-        None?
-    }
+    let mut hosts = tokio::net::lookup_host(addr)
+        .await
+        .map_err(|_| LookupError::ResponseCode(ResponseCode::ServFail))?
+        .peekable();
 
     let mut record_set = RecordSet::new(name, RecordType::A, 0);
     for host in hosts {
@@ -77,31 +81,35 @@ async fn lookup_cname(record_set: &RecordSet) -> Option<Arc<RecordSet>> {
         record_set.add_rdata(record);
     }
 
-    Some(Arc::new(record_set))
+    if record_set.is_empty() {
+        log::debug!("dns lookup returned no ipv4 records");
+        Err(LookupError::ResponseCode(ResponseCode::ServFail))?
+    }
+
+    Ok(Arc::new(record_set))
 }
 
 impl DatabaseAuthorityInner {
-    // todo: self not needed
-
-    async fn lookup_pre(&self, name: &Name, query_type: &RecordType) -> Option<LookupRecords> {
+    async fn lookup_pre(&self, name: &Name, query_type: &RecordType) -> Result<Option<LookupRecords>, LookupError> {
         log::debug!("starting prelookup for {}, {}", name, query_type);
-        let records = self.records.get(name)?;
+        let records = match self.records.get(name) {
+            Some(records) => records,
+            None => return Ok(None)
+        };
 
-        let record_set = match records.get(query_type) {
-            Some(record_set) => Arc::clone(record_set),
+        let record_set = match (records.get(query_type), records.get(&RecordType::CNAME)) {
+            (Some(record_set), _) => Arc::clone(record_set),
             // if no A Record can be found, see if maybe it is configured as a cname
-            None if *query_type == RecordType::A => {
-                let record_set = records.get(&RecordType::CNAME)?;
-                lookup_cname(record_set).await?
-            }
-            None => None?,
+            (None, Some(record_set)) if *query_type == RecordType::A =>
+                lookup_cname(record_set).await?,
+            (None, _) => Err(LookupError::NameExists)?,
         };
         log::debug!("pre lookup resolved: {:?}", record_set);
-        Some(LookupRecords::new(
+        Ok(Some(LookupRecords::new(
             false,
             self.supported_algorithms,
             record_set,
-        ))
+        )))
     }
 
     async fn acme_challenge(&self, name: Name) -> Result<LookupRecords, LookupError> {
@@ -162,14 +170,14 @@ impl Authority for DatabaseAuthority {
         let name = Name::from(query.name());
         let query_type = query.query_type();
 
-        Box::pin(async move {
-            let pre = authority.lookup_pre(&name, &query_type).await;
-            if let Some(pre) = pre {
-                return Ok(pre);
+        async move {
+            if name.is_empty() {
+                return Ok(LookupRecords::Empty);
             }
 
-            if RecordType::TXT != query_type || name.len() == 0 {
-                return Ok(LookupRecords::Empty);
+            match authority.lookup_pre(&name, &query_type).await? {
+                Some(pre) => return Ok(pre),
+                _ => {}
             }
 
             let first = name[0].to_string();
@@ -178,20 +186,22 @@ impl Authority for DatabaseAuthority {
             }
 
             let pool = &authority.pool;
-            match DomainFacade::find_by_id(pool, &first).await {
-                Some(Domain { txt: Some(txt), .. }) => {
-                    let txt = TXT::new(vec![txt]);
-                    let record = Record::from_rdata(name, 100, RData::TXT(txt));
-                    let record = Arc::new(RecordSet::from(record));
-                    Ok(LookupRecords::new(
-                        false,
-                        authority.supported_algorithms,
-                        record,
-                    ))
-                }
-                _ => Ok(LookupRecords::Empty),
-            }
-        })
+            let txt = match DomainFacade::find_by_id(pool, &first).await {
+                Some(Domain { txt: Some(txt), .. }) => txt,
+                _ => return Ok(LookupRecords::Empty),
+            };
+
+            let txt = TXT::new(vec![txt]);
+            let record = Record::from_rdata(name, 100, RData::TXT(txt));
+            let record_set = Arc::new(RecordSet::from(record));
+
+            Ok(LookupRecords::new(
+                false,
+                authority.supported_algorithms,
+                record_set,
+            ))
+        }
+        .boxed()
     }
 
     fn get_nsec_records(

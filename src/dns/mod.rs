@@ -1,7 +1,6 @@
 use std::error::Error;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tokio::runtime::Runtime;
-use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{AuthorityObject, Catalog};
 use trust_dns_server::ServerFuture;
 
@@ -18,10 +17,11 @@ pub struct DNS<'a, A> {
 
 impl<'a, A: ToSocketAddrs> DNS<'a, A> {
     pub fn new(addr: A, runtime: &'a Runtime, authority: Box<dyn AuthorityObject>) -> Self {
-        let root = LowerName::from(Name::root());
         let mut catalog = Catalog::new();
-        catalog.upsert(root, authority);
+        catalog.upsert(authority.origin().clone(), authority);
+
         let server = ServerFuture::new(catalog);
+
         DNS {
             server,
             addr,
