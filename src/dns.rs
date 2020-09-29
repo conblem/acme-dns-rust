@@ -17,29 +17,27 @@ use trust_dns_server::ServerFuture;
 
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
-use futures_util::StreamExt;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::error::Error;
 use std::str::FromStr;
-use trust_dns_server::proto::rr::record_data::RData::A;
 
 // use result instead of error
 fn parse_record(
     name: &Name,
     record_type: &str,
     ttl: u32,
-    mut value: Vec<String>,
+    value: impl Iterator<Item = String>,
 ) -> Option<RecordSet> {
     let record = match record_type {
         "TXT" => |val: String| Some(RData::TXT(TXT::new(vec![val]))),
         "A" => |val: String| Some(RData::A(val.parse().ok()?)),
-        _ => return None,
+        _ => None?,
     };
 
     let mut iter = value.into_iter().flat_map(record);
+    let record = Record::from_rdata(name.clone(), ttl, iter.next()?);
+    let mut record_set = RecordSet::from(record);
 
-    let mut record_set = RecordSet::from(Record::from_rdata(name.clone(), ttl, iter.next()?));
     for record in iter {
         record_set.add_rdata(record);
     }
@@ -47,15 +45,23 @@ fn parse_record(
     Some(record_set)
 }
 
-fn parse(records: HashMap<String, Vec<Vec<String>>>) -> Option<HashMap<Name, HashMap<RecordType, RecordSet>>> {
-    let result = Default::default();
+fn parse(
+    records: HashMap<String, Vec<Vec<String>>>,
+) -> Option<HashMap<Name, HashMap<RecordType, Arc<RecordSet>>>> {
+    let mut result: HashMap<Name, HashMap<RecordType, Arc<RecordSet>>> = Default::default();
+
     for (name, val) in records {
         let name = Name::from_str(&name).ok()?;
         for val in val {
             let mut iter = val.into_iter();
             let record_type = iter.next()?;
             let ttl = iter.next()?.parse().ok()?;
-            let record_set = parse_record(&name, &record_type, ttl, iter.collect())?;
+            let record_set = parse_record(&name, &record_type, ttl, iter)?;
+            let record_type = record_set.record_type();
+            result
+                .entry(name.clone())
+                .or_default()
+                .insert(record_type, Arc::new(record_set));
         }
     }
 
@@ -72,12 +78,13 @@ pub struct DatabaseAuthority {
 impl DatabaseAuthority {
     pub fn new(pool: PgPool, name: String, records: HashMap<String, Vec<Vec<String>>>) -> Self {
         let lower = LowerName::from(Name::root());
+        let records = Arc::new(parse(records).unwrap());
 
         DatabaseAuthority {
             lower,
             pool,
             name,
-            records: Default::default(),
+            records,
         }
     }
 
