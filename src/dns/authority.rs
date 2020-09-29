@@ -79,7 +79,7 @@ impl DatabaseAuthorityInner {
 
         let record_set = match records.get(query_type) {
             Some(record_set) => Arc::clone(record_set),
-            // if no A Record can be found see if maybe it is configured as a cname
+            // if no A Record can be found, see if maybe it is configured as a cname
             None if *query_type == RecordType::A => {
                 let record_set = records.get(&RecordType::CNAME)?;
                 DatabaseAuthorityInner::lookup_cname(record_set).await?
@@ -153,8 +153,6 @@ impl Authority for DatabaseAuthority {
 
         Box::pin(async move {
             let pre = authority.lookup_pre(&name, &query_type).await;
-            let pool = &authority.pool;
-
             if let Some(pre) = pre {
                 return Ok(pre);
             }
@@ -168,6 +166,7 @@ impl Authority for DatabaseAuthority {
                 return authority.acme_challenge(name).await;
             }
 
+            let pool = &authority.pool;
             match DomainFacade::find_by_id(pool, &first).await {
                 Some(Domain { txt: Some(txt), .. }) => {
                     let txt = TXT::new(vec![txt]);
