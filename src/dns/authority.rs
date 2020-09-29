@@ -53,12 +53,16 @@ impl DatabaseAuthority {
 
 impl DatabaseAuthorityInner {
     async fn lookup_cname(record_set: &RecordSet) -> Option<Arc<RecordSet>> {
-        let mut hosts = tokio::net::lookup_host("google.com").await.ok()?.peekable();
+        let name = record_set.name();
+
+        // hack tokio expects a socket addr
+        let addr = format!("{}:80", name);
+        let mut hosts = tokio::net::lookup_host(addr).await.ok()?.peekable();
 
         // return if hosts is empty
         hosts.peek()?;
 
-        let mut record_set = RecordSet::new(record_set.name(), RecordType::A, 0);
+        let mut record_set = RecordSet::new(name, RecordType::A, 0);
         for host in hosts {
             let record = match host.ip() {
                 V4(ip) => RData::A(ip),
