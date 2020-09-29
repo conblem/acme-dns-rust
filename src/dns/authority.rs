@@ -52,15 +52,23 @@ impl DatabaseAuthority {
 }
 
 impl DatabaseAuthorityInner {
-    async fn lookup_cname(record_set: &RecordSet) -> Option<Arc<RecordSet>> {
+    // todo: self not needed
+    async fn lookup_cname(&self, record_set: &RecordSet) -> Option<Arc<RecordSet>> {
         let name = record_set.name();
+        let cname = match record_set.records_without_rrsigs().next()?.rdata() {
+            RData::CNAME(cname) => cname,
+            _ => None?,
+        };
 
         // hack tokio expects a socket addr
-        let addr = format!("{}:80", name);
+        let addr = format!("{}:80", cname);
+        log::debug!("resolving following cname ip {}", addr);
         let mut hosts = tokio::net::lookup_host(addr).await.ok()?.peekable();
 
-        // return if hosts is empty
-        hosts.peek()?;
+        if hosts.peek().is_none() {
+            log::debug!("empty lookup_host");
+            None?
+        }
 
         let mut record_set = RecordSet::new(name, RecordType::A, 0);
         for host in hosts {
@@ -75,6 +83,7 @@ impl DatabaseAuthorityInner {
     }
 
     async fn lookup_pre(&self, name: &Name, query_type: &RecordType) -> Option<LookupRecords> {
+        log::debug!("starting prelookup for {}, {}", name, query_type);
         let records = self.records.get(name)?;
 
         let record_set = match records.get(query_type) {
@@ -82,10 +91,11 @@ impl DatabaseAuthorityInner {
             // if no A Record can be found, see if maybe it is configured as a cname
             None if *query_type == RecordType::A => {
                 let record_set = records.get(&RecordType::CNAME)?;
-                DatabaseAuthorityInner::lookup_cname(record_set).await?
+                self.lookup_cname(record_set).await?
             }
             None => None?,
         };
+        log::debug!("pre lookup resolved: {:?}", record_set);
         Some(LookupRecords::new(
             false,
             self.supported_algorithms,

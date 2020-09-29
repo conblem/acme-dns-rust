@@ -11,14 +11,14 @@ fn parse_record(
     ttl: u32,
     value: impl Iterator<Item = String>,
 ) -> Option<RecordSet> {
-    let record: fn(String, &Name) -> Option<RData> = match record_type {
-        "TXT" => |val, _name| Some(RData::TXT(TXT::new(vec![val]))),
-        "A" => |val, _name| Some(RData::A(val.parse().ok()?)),
-        "CNAME" => |_val, name| Some(RData::CNAME(name.clone())),
+    let record: fn(String) -> Option<RData> = match record_type {
+        "TXT" => |val| Some(RData::TXT(TXT::new(vec![val]))),
+        "A" => |val| Some(RData::A(val.parse().ok()?)),
+        "CNAME" => |val| Some(RData::CNAME(Name::from_str(&val).ok()?)),
         _ => None?,
     };
 
-    let mut iter = value.into_iter().flat_map(|val| record(val, name));
+    let mut iter = value.into_iter().flat_map(record);
     let record = Record::from_rdata(name.clone(), ttl, iter.next()?);
     let mut record_set = RecordSet::from(record);
 
@@ -35,7 +35,8 @@ pub(super) fn parse(
     let mut result: HashMap<Name, HashMap<RecordType, Arc<RecordSet>>> = Default::default();
 
     for (name, val) in records {
-        let name = Name::from_str(&name).ok()?;
+        let mut name = Name::from_str(&name).ok()?;
+        name.set_fqdn(true);
         for val in val {
             let mut iter = val.into_iter();
             let record_type = iter.next()?;
@@ -49,5 +50,6 @@ pub(super) fn parse(
         }
     }
 
+    log::debug!("records parsed {:?}", result);
     Some(result)
 }
