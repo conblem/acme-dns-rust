@@ -21,6 +21,7 @@ use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 use super::parse::parse;
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
+use crate::error::Error;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 
@@ -123,13 +124,13 @@ impl DatabaseAuthorityInner {
 
         let cert = match CertFacade::first_cert(pool).await {
             Ok(Some(cert)) => cert,
-            Ok(None) => return Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound))),
-            Err(e) => return Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e))),
+            Ok(None) => return Err(Error::from(io::ErrorKind::NotFound).into()),
+            Err(e) => return Err(Error(e).io().into()),
         };
         let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
             Ok(Some(domain)) => domain,
-            Ok(None) => return Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound))),
-            Err(e) => return Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e))),
+            Ok(None) => return Err(Error::from(io::ErrorKind::NotFound).into()),
+            Err(e) => return Err(Error(e).io().into()),
         };
 
         //use match txt can be empty

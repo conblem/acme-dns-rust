@@ -56,14 +56,15 @@ impl DomainFacade {
     pub async fn update_domain<'a, E: Executor<'a, Database = Postgres>>(
         executor: E,
         domain: &Domain,
-    ) {
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE domain SET username = $1, password = $2, txt = $3 WHERE id = $4")
             .bind(&domain.username)
             .bind(&domain.password)
             .bind(&domain.txt)
             .bind(&domain.id)
             .execute(executor)
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 }

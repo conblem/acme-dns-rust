@@ -60,9 +60,9 @@ impl Persist for DatabasePersist {
                 .fetch(&self.pool);
 
         match self.handle.block_on(rows.try_next()) {
-            Err(e) => return Err(acme_lib::Error::from(e.to_string())),
-            Ok(None) => return Ok(None),
             Ok(Some(row)) => row.try_get("value"),
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(acme_lib::Error::from(e.to_string())),
         }
         .map_err(|err| acme_lib::Error::from(err.to_string()))
     }

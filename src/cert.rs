@@ -228,7 +228,7 @@ impl CertManager {
         let proof = call.dns_proof();
 
         domain.txt = Some(proof);
-        DomainFacade::update_domain(&self.pool, &domain).await;
+        DomainFacade::update_domain(&self.pool, &domain).await?;
 
         //error handling
         let cert = tokio::task::spawn_blocking(move || {
