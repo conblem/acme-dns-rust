@@ -71,8 +71,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
     log::debug!("resolving following cname ip {}", addr);
     let hosts = tokio::net::lookup_host(addr)
         .await
-        .map_err(|_| LookupError::ResponseCode(ResponseCode::ServFail))?
-        .peekable();
+        .map_err(|_| LookupError::ResponseCode(ResponseCode::ServFail))?;
 
     let mut record_set = RecordSet::new(name, RecordType::A, 0);
     for host in hosts {
