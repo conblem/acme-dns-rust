@@ -133,7 +133,7 @@ impl DatabaseAuthorityInner {
             Err(e) => return Err(Error(e).io().into()),
         };
 
-        //use match txt can be empty
+        // todo: use match txt can be empty
         let txt = TXT::new(vec![domain.txt.unwrap()]);
         let record = Record::from_rdata(name, 100, RData::TXT(txt));
         let record = Arc::new(RecordSet::from(record));
