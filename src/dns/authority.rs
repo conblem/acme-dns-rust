@@ -108,7 +108,7 @@ impl DatabaseAuthorityInner {
             (None, Some(record_set)) if *query_type == RecordType::A => {
                 lookup_cname(record_set).await?
             }
-            (None, _) => return Err(LookupError::NameExists),
+            (None, _) => return Ok(None),
         };
         log::debug!("pre lookup resolved: {:?}", record_set);
         Ok(Some(LookupRecords::new(
@@ -187,6 +187,7 @@ impl Authority for DatabaseAuthority {
                 return Ok(LookupRecords::Empty);
             }
 
+            // todo: don't abort on error still continue with normal lookup
             if let Some(pre) = authority.lookup_pre(&name, &query_type).await? {
                 return Ok(pre);
             }
