@@ -27,6 +27,7 @@ pub struct General {
 pub struct Config {
     pub general: General,
     pub api: Api,
+    #[serde(default)]
     pub records: HashMap<String, Vec<Vec<String>>>,
 }
 
