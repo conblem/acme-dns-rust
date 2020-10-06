@@ -1,5 +1,4 @@
-use crate::cert::{Cert, CertFacade};
-use crate::domain::{Domain, DomainFacade};
+use futures_util::future::OptionFuture;
 use futures_util::stream::TryStream;
 use futures_util::{StreamExt, TryStreamExt};
 use parking_lot::RwLock;
@@ -14,6 +13,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
 use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
+
+use crate::cert::{Cert, CertFacade};
+use crate::domain::{Domain, DomainFacade};
 use crate::error::Error;
 
 struct Acceptor {
@@ -31,7 +33,9 @@ impl Acceptor {
         }
     }
 
-    fn create_server_config(db_cert: &mut Cert) -> Result<Arc<ServerConfig>, Error<std::io::Error>> {
+    fn create_server_config(
+        db_cert: &mut Cert,
+    ) -> Result<Arc<ServerConfig>, Error<std::io::Error>> {
         let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
             (Some(ref mut private), Some(ref mut cert)) => (private, cert),
             _ => return Err(Error::from("Cert has no Cert or Private")),
@@ -89,7 +93,7 @@ impl Https {
     fn stream(
         self,
     ) -> impl TryStream<
-        Ok = impl AsyncRead + AsyncWrite + Send + 'static + Unpin,
+        Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static,
         Error = Box<dyn std::error::Error + Send + Sync>,
     > + Send {
         let acceptor = Acceptor::new(self.pool);
@@ -138,16 +142,16 @@ impl Api {
         https: Option<A>,
         pool: PgPool,
     ) -> tokio::io::Result<Self> {
-        let http = match http {
-            Some(http) => Some(TcpListener::bind(http).await?),
-            None => None,
-        };
-        let https = match https {
-            Some(https) => Some(Https::new(pool.clone(), https).await?),
-            None => None,
-        };
+        let http: OptionFuture<_> = http.map(TcpListener::bind).into();
+        let https: OptionFuture<_> = https.map(|h| Https::new(pool.clone(), h)).into();
 
-        Ok(Api { http, https, pool })
+        let (http, https) = tokio::join!(http, https);
+
+        Ok(Api {
+            http: http.transpose()?,
+            https: https.transpose()?,
+            pool,
+        })
     }
 
     pub async fn spawn(self) -> Result<(), Box<dyn std::error::Error>> {

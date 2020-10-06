@@ -1,7 +1,7 @@
-use std::io;
-use std::fmt::{Debug, Display, Formatter};
-use trust_dns_server::authority::LookupError;
 use futures_util::io::ErrorKind;
+use std::fmt::{Debug, Display, Formatter};
+use std::io;
+use trust_dns_server::authority::LookupError;
 
 #[derive(Debug)]
 pub(crate) struct Error<E>(pub(crate) E);
@@ -13,19 +13,19 @@ impl Error<io::Error> {
     }
 }
 
-impl <E: 'static + Into<Box<dyn std::error::Error + Send + Sync>>> Error<E> {
+impl<E: 'static + Into<Box<dyn std::error::Error + Send + Sync>>> Error<E> {
     pub(crate) fn io(self) -> Error<std::io::Error> {
         Error(io::Error::new(io::ErrorKind::Other, self.0))
     }
 }
 
-impl <E: 'static + std::error::Error> std::error::Error for Error<E> {
+impl<E: 'static + std::error::Error> std::error::Error for Error<E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.0)
     }
 }
 
-impl <E: Display> Display for Error<E> {
+impl<E: Display> Display for Error<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.0.fmt(f)
     }
