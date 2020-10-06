@@ -1,5 +1,6 @@
 use futures_util::future::OptionFuture;
 use futures_util::stream::TryStream;
+use futures_util::FutureExt;
 use futures_util::{StreamExt, TryStreamExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
@@ -142,16 +143,13 @@ impl Api {
         https: Option<A>,
         pool: PgPool,
     ) -> tokio::io::Result<Self> {
-        let http: OptionFuture<_> = http.map(TcpListener::bind).into();
-        let https: OptionFuture<_> = https.map(|h| Https::new(pool.clone(), h)).into();
+        let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
+        let https =
+            OptionFuture::from(https.map(|h| Https::new(pool.clone(), h))).map(Option::transpose);
 
-        let (http, https) = tokio::join!(http, https);
+        let (http, https) = tokio::try_join!(http, https)?;
 
-        Ok(Api {
-            http: http.transpose()?,
-            https: https.transpose()?,
-            pool,
-        })
+        Ok(Api { http, https, pool })
     }
 
     pub async fn spawn(self) -> Result<(), Box<dyn std::error::Error>> {
