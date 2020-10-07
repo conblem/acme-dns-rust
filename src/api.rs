@@ -162,12 +162,12 @@ impl Api {
 
         let http = self
             .http
-            .map(|http| serve(routes.clone()).run_incoming(http))
+            .map(|http| serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
         let https = self
             .https
-            .map(|https| serve(routes).run_incoming(https.stream()))
+            .map(|https| serve(routes).serve_incoming(https.stream()))
             .map(tokio::spawn);
 
         match (https, http) {
