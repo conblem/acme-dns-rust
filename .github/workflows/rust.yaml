@@ -30,10 +30,10 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
       - run: docker pull ghcr.io/conblem/musl-openssl
       - uses: actions-rs/cargo@v1
-          with:
-            use-cross: true
-            command: build
-            args: --target x86_64-unknown-linux-musl --release
+        with:
+          use-cross: true
+          command: build
+          args: --target x86_64-unknown-linux-musl --release
       - name: Security audit
         uses: actions-rs/audit-check@v1
         with:
