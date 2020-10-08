@@ -4,6 +4,8 @@ use sqlx::{Pool, Postgres};
 use tokio::runtime::Handle;
 use tokio::stream::StreamExt;
 
+use crate::util::to_i64;
+
 #[derive(Clone)]
 pub struct DatabasePersist {
     pool: Pool<Postgres>,
@@ -27,23 +29,20 @@ fn persist_kind(kind: &PersistKind) -> &str {
     }
 }
 
-fn to_i64(val: &u64) -> i64 {
-    i64::from_ne_bytes(val.to_ne_bytes())
-}
-
 impl Persist for DatabasePersist {
     fn put<'a>(&self, key: &PersistKey<'a>, value: &[u8]) -> acme_lib::Result<()> {
         let PersistKey { realm, kind, key } = key;
 
+        let query =
+            sqlx::query("INSERT INTO acme (key, realm, kind, value) VALUES ($1, $2, $3, $4)")
+                .bind(key)
+                .bind(to_i64(realm))
+                .bind(persist_kind(kind))
+                .bind(value)
+                .execute(&self.pool);
+
         self.handle
-            .block_on(
-                sqlx::query("INSERT INTO acme (key, realm, kind, value) VALUES ($1, $2, $3, $4)")
-                    .bind(key)
-                    .bind(to_i64(realm))
-                    .bind(persist_kind(kind))
-                    .bind(value)
-                    .execute(&self.pool),
-            )
+            .block_on(query)
             .map_err(|err| acme_lib::Error::from(err.to_string()))?;
 
         Ok(())

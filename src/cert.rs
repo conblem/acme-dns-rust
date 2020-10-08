@@ -1,26 +1,27 @@
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
-use chrono::{DateTime, Duration, Local};
-use sqlx::{Executor, FromRow, PgPool, Postgres, Type};
+use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::error::Error;
 use std::io::ErrorKind;
+use std::time::Duration;
 use tokio::time::Interval;
 use uuid::Uuid;
 
 use crate::acme::DatabasePersist;
 use crate::domain::{Domain, DomainFacade};
+use crate::util::{now, to_i64, HOUR};
 
-#[derive(sqlx::Type, Debug, PartialEq)]
+#[derive(sqlx::Type, Debug, PartialEq, Clone)]
 #[repr(i32)]
 pub enum State {
     Ok = 0,
     Updating = 1,
 }
 
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, Clone)]
 pub struct Cert {
-    id: String,
-    update: DateTime<Local>,
-    state: State,
+    pub(crate) id: String,
+    pub(crate) update: i64,
+    pub(crate) state: State,
     pub cert: Option<String>,
     pub private: Option<String>,
     #[sqlx(rename = "domain_id")]
@@ -34,10 +35,11 @@ impl PartialEq for Cert {
 }
 
 impl Cert {
+    // remove expect
     fn new(domain: &Domain) -> Self {
         Cert {
             id: Uuid::new_v4().to_simple().to_string(),
-            update: Local::now(),
+            update: to_i64(&now()),
             state: State::Updating,
             cert: None,
             private: None,
@@ -51,10 +53,7 @@ pub struct CertFacade {}
 impl CertFacade {
     pub async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(
         executor: E,
-    ) -> Result<Option<Cert>, sqlx::Error>
-    where
-        DateTime<Local>: Type<Postgres>,
-    {
+    ) -> Result<Option<Cert>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM cert LIMIT 1")
             .fetch_optional(executor)
             .await
@@ -106,9 +105,11 @@ impl CertFacade {
                 Some(cert)
             }
             Some(mut cert) => {
-                let one_hour_ago = Local::now() - Duration::hours(1);
+                // use constant variables
+                let now = to_i64(&now());
+                let one_hour_ago = now - to_i64(&HOUR);
                 if cert.update < one_hour_ago {
-                    cert.update = Local::now();
+                    cert.update = now;
                     cert.state = State::Updating;
                     CertFacade::update_cert(&mut transaction, &cert).await?;
                     Some(cert)
@@ -167,9 +168,10 @@ impl CertManager {
         Ok(CertManager { pool, directory })
     }
 
+    // maybe useless function
     fn interval() -> Interval {
-        let duration = Duration::hours(1).to_std().unwrap();
-        tokio::time::interval(duration)
+        // use constant
+        tokio::time::interval(Duration::from_secs(3600))
     }
 }
 

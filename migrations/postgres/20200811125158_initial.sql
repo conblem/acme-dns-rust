@@ -1,4 +1,3 @@
--- Add migration script here
 create table domain
 (
 	id char(32) not null
@@ -17,6 +16,7 @@ create unique index domain_password_uindex
 
 create unique index domain_username_uindex
 	on domain (username);
+
 
 create table cert
 (
@@ -39,3 +39,18 @@ create unique index cert_id_uindex
 create unique index cert_cert_uindex
 	on cert (domain_id);
 
+
+create table acme
+(
+	key varchar not null,
+	realm bigint not null,
+	kind char(3) not null,
+	value bytea not null
+);
+
+create unique index acme_key_uindex
+	on acme (key);
+
+alter table acme
+	add constraint acme_pk
+		primary key (key);

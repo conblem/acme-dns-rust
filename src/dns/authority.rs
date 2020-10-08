@@ -21,7 +21,7 @@ use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 use super::parse::parse;
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
-use crate::error::Error;
+use crate::util::Error;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 

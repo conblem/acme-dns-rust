@@ -17,7 +17,7 @@ use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
 
 use crate::cert::{Cert, CertFacade};
 use crate::domain::{Domain, DomainFacade};
-use crate::error::Error;
+use crate::util::Error;
 
 struct Acceptor {
     pool: PgPool,
@@ -80,45 +80,33 @@ impl Acceptor {
     }
 }
 
-pub struct Https {
-    pool: PgPool,
+fn stream(
     listener: TcpListener,
-}
+    pool: PgPool,
+) -> impl TryStream<
+    Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    Error = Box<dyn std::error::Error + Send + Sync>,
+> + Send {
+    let acceptor = Acceptor::new(pool);
+    let acceptor_stream =
+        futures_util::stream::unfold(acceptor, |acc| async { Some((acc.load_cert().await, acc)) });
 
-impl Https {
-    async fn new<A: ToSocketAddrs>(pool: PgPool, addr: A) -> tokio::io::Result<Self> {
-        let listener = TcpListener::bind(addr).await?;
-        Ok(Https { pool, listener })
-    }
-
-    fn stream(
-        self,
-    ) -> impl TryStream<
-        Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static,
-        Error = Box<dyn std::error::Error + Send + Sync>,
-    > + Send {
-        let acceptor = Acceptor::new(self.pool);
-        let acceptor_stream = futures_util::stream::unfold(acceptor, |acc| async {
-            Some((acc.load_cert().await, acc))
-        });
-
-        self.listener
-            .zip(acceptor_stream)
-            .then(|item| async move {
-                match item {
-                    (Ok(stream), Ok(acceptor)) => Ok(acceptor.accept(stream).await?),
-                    (Err(e), _) => Err(e.into()),
-                    (_, Err(e)) => Err(e),
-                }
-            })
-            .inspect_err(|err| log::error!("Stream error: {}", err))
-            .filter(|stream| futures_util::future::ready(stream.is_ok()))
-    }
+    listener
+        .zip(acceptor_stream)
+        .then(|item| async move {
+            match item {
+                (Ok(stream), Ok(acceptor)) => Ok(acceptor.accept(stream).await?),
+                (Err(e), _) => Err(e.into()),
+                (_, Err(e)) => Err(e),
+            }
+        })
+        .inspect_err(|err| log::error!("Stream error: {}", err))
+        .filter(|stream| futures_util::future::ready(stream.is_ok()))
 }
 
 pub struct Api {
     http: Option<TcpListener>,
-    https: Option<Https>,
+    https: Option<TcpListener>,
     pool: PgPool,
 }
 
@@ -144,8 +132,7 @@ impl Api {
         pool: PgPool,
     ) -> tokio::io::Result<Self> {
         let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
-        let https =
-            OptionFuture::from(https.map(|h| Https::new(pool.clone(), h))).map(Option::transpose);
+        let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
 
         let (http, https) = tokio::try_join!(http, https)?;
 
@@ -153,7 +140,7 @@ impl Api {
     }
 
     pub async fn spawn(self) -> Result<(), Box<dyn std::error::Error>> {
-        let pool = self.pool;
+        let pool = self.pool.clone();
         let routes = warp::path("register")
             .and(warp::post())
             .map(move || pool.clone())
@@ -165,9 +152,10 @@ impl Api {
             .map(|http| serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
+        let pool = self.pool.clone();
         let https = self
             .https
-            .map(|https| serve(routes).serve_incoming(https.stream()))
+            .map(|https| serve(routes).serve_incoming(stream(https, pool)))
             .map(tokio::spawn);
 
         match (https, http) {

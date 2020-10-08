@@ -19,7 +19,8 @@ mod cert;
 mod config;
 mod dns;
 mod domain;
-mod error;
+mod facade;
+mod util;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
