@@ -1,13 +1,9 @@
-#[cfg(feature = "mysql")]
-use sqlx::MySqlPool;
-#[cfg(feature = "postgres")]
-use sqlx::PgPool;
-use sqlx::{ColumnIndex, Database, Decode, Encode, Error, Executor, IntoArguments, Pool, Type};
-
-use crate::cert::Cert;
 use sqlx::database::HasArguments;
+use sqlx::{ColumnIndex, Database, Decode, Encode, Error, Executor, IntoArguments, Pool, Type};
 use std::future::Future;
 use std::pin::Pin;
+
+use crate::cert::Cert;
 
 pub(crate) trait CertFacade: Send + Sync + Clone {
     fn first_cert(&self) -> Pin<Box<dyn Future<Output = Result<Option<Cert>, sqlx::Error>>>>;
@@ -15,8 +11,8 @@ pub(crate) trait CertFacade: Send + Sync + Clone {
 }
 
 #[derive(Clone)]
-struct CertFacadeImpl<T> {
-    pool: T,
+pub(super) struct CertFacadeImpl<T> {
+    pub(super) pool: T,
 }
 
 impl<DB: 'static + Database> CertFacade for CertFacadeImpl<Pool<DB>>
@@ -54,13 +50,4 @@ where
             Ok(())
         })
     }
-}
-
-#[cfg(feature = "postgres")]
-pub(crate) fn new(pool: PgPool) -> impl CertFacade {
-    CertFacadeImpl { pool }
-}
-#[cfg(feature = "mysql")]
-pub(crate) fn new(pool: MySqlPool) -> impl CertFacade {
-    CertFacadeImpl { pool }
 }
