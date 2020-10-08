@@ -11,7 +11,8 @@ mod cert;
 pub(crate) fn new(pool: PgPool) -> impl CertFacade {
     CertFacadeImpl { pool }
 }
-#[cfg(feature = "mysql")]
+
+#[cfg(not(feature = "postgres"))]
 pub(crate) fn new(pool: MySqlPool) -> impl CertFacade {
     CertFacadeImpl { pool }
 }
