@@ -1,10 +1,8 @@
 name: Docker on Tag
 on:
   push:
-    paths-ignore:
-      - 'cross/**'
     tags:
-      - "v*.*.*"
+      - "v*"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,8 +30,10 @@ jobs:
           use-cross: true
           command: build
           args: --target x86_64-unknown-linux-musl --release
+      - run: echo ::set-output name=tag::${${{ github.ref }}#refs/*/}
+        id: tag
       - uses: docker/build-push-action@v2
         with:
           push: true
-          tags: ghcr.io/conblem/acme-dns-latest:${{ github.ref }}
+          tags: ghcr.io/conblem/acme-dns-latest:${{ steps.tag.outputs.tag }}
           context: ./
