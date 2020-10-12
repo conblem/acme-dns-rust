@@ -24,7 +24,6 @@ jobs:
         with:
           crate: semantic-release-rust
           version: 1.0.0-alpha.6
-          use-tool-cache: true
       - uses: bahmutov/npm-install@v1
       - run: npm ci
       - name: Release
