@@ -17,6 +17,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - run: "sudo apt-get install -y cmake libssl-dev pkg-config zlib1g-dev"
       - uses: actions-rs/install@v0.1
         with:
           crate: semantic-rs
