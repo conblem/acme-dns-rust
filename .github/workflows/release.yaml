@@ -21,6 +21,6 @@ jobs:
           use-tool-cache: true
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
-        run: npx semantic-release@15
+        run: npx semantic-release
