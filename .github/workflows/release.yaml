@@ -1,0 +1,32 @@
+name: Release
+on:
+  push:
+    paths-ignore:
+      - 'cross/**'
+    branches:
+      - master
+env:
+  CI: true
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: semantic-rs
+          version: latest
+          use-tool-cache: true
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: semantic-rs
