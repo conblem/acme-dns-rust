@@ -7,6 +7,7 @@ license-file = "LICENSE"
 keywords = ["acme-dns", "acme", "lets-encrypt", "dns", "async"]
 categories = ["command-line-utilities"]
 repository = "https://github.com/conblem/acme-dns-rust/"
+description = "Acme DNS implementation written in Rust"
 
 [dependencies]
 log = "0.4"
