@@ -18,16 +18,8 @@ jobs:
           crate: semantic-release-rust
           version: 1.0.0-alpha.6
           use-tool-cache: true
-      - uses: actions/cache@v2
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-      - uses: actions/setup-node@v2-beta
-        with:
-          node-version: '12'
-      - run: npm install --save-dev semantic-release@15
+      - uses: bahmutov/npm-install@v1
+      - run: npm ci
       - name: Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
