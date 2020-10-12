@@ -2,6 +2,15 @@ version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+  - package-ecosystem: "npm"
+    directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "daily"
     commit-message:
