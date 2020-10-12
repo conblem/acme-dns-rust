@@ -10,10 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/semantic-release-rust
+          key: ${{ runner.os }}-semantic-release-rust-${{ hashFiles('.github/workflows/release.yaml') }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
       - uses: actions-rs/install@v0.1
+        if: steps.cache.outputs.cache-hit != 'true'
         with:
           crate: semantic-release-rust
           version: 1.0.0-alpha.6
