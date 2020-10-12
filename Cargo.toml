@@ -22,7 +22,6 @@ rustls = "0.18"
 tokio-rustls = "0.14"
 toml = "0.5"
 
-
 [features]
 default = ["postgres"]
 
