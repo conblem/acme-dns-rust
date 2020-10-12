@@ -4,6 +4,6 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-    commit_message:
+    commit-message:
       prefix: "chore"
-      include_scope: true
+      include: "scope"
