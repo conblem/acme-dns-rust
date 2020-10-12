@@ -118,3 +118,4 @@ fabric.properties
 
 # End of https://www.toptal.com/developers/gitignore/api/clion,rust
 config.toml
+/node_modules/
