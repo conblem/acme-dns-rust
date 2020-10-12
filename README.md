@@ -1,5 +1,5 @@
 [![Build](https://github.com/conblem/acme-dns-rust/workflows/Rust/badge.svg)](https://github.com/conblem/acme-dns-rust/actions)
-[![Dependabot Status](https://api.dependabot.com/badges/status?host=github&repo=conblem/acme-dns-rust)](https://dependabot.com)
+[![codecov](https://codecov.io/gh/conblem/acme-dns-rust/branch/dev/graph/badge.svg)](https://codecov.io/gh/conblem/acme-dns-rust)
 
 # Acme DNS Rust
 ### WIP!

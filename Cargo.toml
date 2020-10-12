@@ -3,6 +3,10 @@ name = "acme-dns-rust"
 version = "0.1.0"
 authors = ["conblem <mail@conblem.me>"]
 edition = "2018"
+license-file = "LICENSE"
+keywords = ["acme-dns", "acme", "lets-encrypt", "dns", "async"]
+categories = ["command-line-utilities"]
+repository = "https://github.com/conblem/acme-dns-rust/"
 
 [dependencies]
 log = "0.4"
