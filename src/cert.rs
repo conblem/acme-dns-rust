@@ -107,7 +107,7 @@ impl CertFacade {
             Some(mut cert) => {
                 // use constant variables
                 let now = to_i64(&now());
-                let one_hour_ago = now - to_i64(&HOUR);
+                let one_hour_ago = now - HOUR as i64;
                 if cert.update < one_hour_ago {
                     cert.update = now;
                     cert.state = State::Updating;
