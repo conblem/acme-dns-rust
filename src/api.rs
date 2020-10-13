@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Error, Result};
 use futures_util::future::OptionFuture;
 use futures_util::stream::TryStream;
 use futures_util::FutureExt;
@@ -7,7 +8,6 @@ use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
 use std::io::Cursor;
-use std::io::ErrorKind;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -17,7 +17,6 @@ use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
 
 use crate::cert::{Cert, CertFacade};
 use crate::domain::{Domain, DomainFacade};
-use crate::util::Error;
 
 struct Acceptor {
     pool: PgPool,
@@ -34,35 +33,30 @@ impl Acceptor {
         }
     }
 
-    fn create_server_config(
-        db_cert: &mut Cert,
-    ) -> Result<Arc<ServerConfig>, Error<std::io::Error>> {
+    fn create_server_config(db_cert: &mut Cert) -> Result<Arc<ServerConfig>> {
         let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
             (Some(ref mut private), Some(ref mut cert)) => (private, cert),
-            _ => return Err(Error::from("Cert has no Cert or Private")),
+            _ => return Err(anyhow!("Cert has no Cert or Private")),
         };
 
         let mut private = Cursor::new(private);
         let mut privates = pkcs8_private_keys(&mut private)
-            .map_err(|_| Error::msg(ErrorKind::InvalidInput, "Private is invalid"))?;
+            .map_err(|_| anyhow!("Private is invalid {:?}", private))?;
         let private = privates
             .pop()
-            .ok_or_else(|| Error::from("Private Vec is empty"))?;
+            .ok_or_else(|| anyhow!("Private Vec is empty {:?}", privates))?;
 
         let mut cert = Cursor::new(cert);
-        let cert =
-            certs(&mut cert).map_err(|_| Error::msg(ErrorKind::InvalidInput, "Cert is invalid"))?;
+        let cert = certs(&mut cert).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
 
         let mut config = ServerConfig::new(NoClientAuth::new());
-        config
-            .set_single_cert(cert, private)
-            .map_err(|_| Error::from("Couldn't configure Config with Cert and Private"))?;
+        config.set_single_cert(cert, private)?;
         config.set_protocols(&["h2".into(), "http/1.1".into()]);
 
         Ok(Arc::new(config))
     }
 
-    async fn load_cert(&self) -> Result<TlsAcceptor, Box<dyn std::error::Error + Send + Sync>> {
+    async fn load_cert(&self) -> Result<TlsAcceptor> {
         let new_cert = CertFacade::first_cert(&self.pool).await?;
 
         // could probably be improved
@@ -83,10 +77,8 @@ impl Acceptor {
 fn stream(
     listener: TcpListener,
     pool: PgPool,
-) -> impl TryStream<
-    Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    Error = Box<dyn std::error::Error + Send + Sync>,
-> + Send {
+) -> impl TryStream<Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error = Error> + Send
+{
     let acceptor = Acceptor::new(pool);
     let acceptor_stream =
         futures_util::stream::unfold(acceptor, |acc| async { Some((acc.load_cert().await, acc)) });
@@ -130,7 +122,7 @@ impl Api {
         http: Option<A>,
         https: Option<A>,
         pool: PgPool,
-    ) -> tokio::io::Result<Self> {
+    ) -> Result<Self> {
         let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
         let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
 
@@ -139,7 +131,7 @@ impl Api {
         Ok(Api { http, https, pool })
     }
 
-    pub async fn spawn(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn spawn(self) -> Result<()> {
         let pool = self.pool.clone();
         let routes = warp::path("register")
             .and(warp::post())

@@ -1,6 +1,6 @@
+use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 
@@ -34,7 +34,7 @@ pub struct Config {
 const DEFAULT_CONFIG_PATH: &str = "config.toml";
 
 // is not async so we can use it to load settings for tokio runtime
-pub fn config(config_path: Option<String>) -> Result<Config, Box<dyn Error>> {
+pub fn config(config_path: Option<String>) -> Result<Config> {
     let config_path = config_path.as_deref().unwrap_or(DEFAULT_CONFIG_PATH);
     let mut file = File::open(config_path)?;
     let mut bytes = vec![];

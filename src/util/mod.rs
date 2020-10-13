@@ -1,8 +1,5 @@
+use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-mod error;
-
-pub(crate) use self::error::Error;
 
 pub(crate) const fn to_i64(val: &u64) -> i64 {
     i64::from_ne_bytes(val.to_ne_bytes())
@@ -14,6 +11,16 @@ pub(crate) fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("unix epoch is safe")
         .as_secs()
+}
+
+pub(crate) fn error<E: From<io::Error>>(err: impl Into<anyhow::Error>) -> E {
+    let err = err.into();
+    let err = match err.downcast::<io::Error>() {
+        Ok(err) => err,
+        Err(err) => io::Error::new(io::ErrorKind::Other, err),
+    };
+
+    E::from(err)
 }
 
 #[cfg(test)]

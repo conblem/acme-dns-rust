@@ -5,6 +5,7 @@ name = "acme-dns-rust"
 version = "0.1.0"
 dependencies = [
  "acme-lib",
+ "anyhow",
  "bcrypt",
  "futures-util",
  "log",
@@ -67,6 +68,12 @@ checksum = "043164d8ba5c4c3035fec9bbee8647c0261d788f3474306f93bb65901cae0e86"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "anyhow"
+version = "1.0.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1fd36ffbb1fb7c834eac128ea8d0e310c5aeb635548f9d58861e1308d46e71c"
 
 [[package]]
 name = "async-trait"

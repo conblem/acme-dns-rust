@@ -26,6 +26,7 @@ futures-util = "0.3"
 rustls = "0.18"
 tokio-rustls = "0.14"
 toml = "0.5"
+anyhow = "1.0"
 
 [features]
 default = ["postgres"]
