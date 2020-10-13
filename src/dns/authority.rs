@@ -17,11 +17,12 @@ use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
+use anyhow::anyhow;
 
 use super::parse::parse;
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
-use crate::util::Error;
+use crate::util::error;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 
@@ -123,13 +124,13 @@ impl DatabaseAuthorityInner {
 
         let cert = match CertFacade::first_cert(pool).await {
             Ok(Some(cert)) => cert,
-            Ok(None) => return Err(Error::from(io::ErrorKind::NotFound).into()),
-            Err(e) => return Err(Error(e).io().into()),
+            Ok(None) => return Err(error(anyhow!("First cert not found"))),
+            Err(e) => return Err(error(e)),
         };
         let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
             Ok(Some(domain)) => domain,
-            Ok(None) => return Err(Error::from(io::ErrorKind::NotFound).into()),
-            Err(e) => return Err(Error(e).io().into()),
+            Ok(None) => return Err(error(anyhow!("Domain not found {}", cert.domain))),
+            Err(e) => return Err(error(e)),
         };
 
         // todo: use match txt can be empty

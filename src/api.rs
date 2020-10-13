@@ -14,10 +14,11 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
 use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
+use anyhow::{Result, anyhow};
 
 use crate::cert::{Cert, CertFacade};
 use crate::domain::{Domain, DomainFacade};
-use crate::util::Error;
+use crate::util::error;
 
 struct Acceptor {
     pool: PgPool,
@@ -36,33 +37,32 @@ impl Acceptor {
 
     fn create_server_config(
         db_cert: &mut Cert,
-    ) -> Result<Arc<ServerConfig>, Error<std::io::Error>> {
+    ) -> Result<Arc<ServerConfig>> {
         let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
             (Some(ref mut private), Some(ref mut cert)) => (private, cert),
-            _ => return Err(Error::from("Cert has no Cert or Private")),
+            _ => return Err(anyhow!("Cert has no Cert or Private")),
         };
 
         let mut private = Cursor::new(private);
         let mut privates = pkcs8_private_keys(&mut private)
-            .map_err(|_| Error::msg(ErrorKind::InvalidInput, "Private is invalid"))?;
+            .map_err(|_| anyhow!("Private is invalid {:?}", private))?;
         let private = privates
             .pop()
-            .ok_or_else(|| Error::from("Private Vec is empty"))?;
+            .ok_or_else(|| anyhow!("Private Vec is empty {:?}", privates))?;
 
         let mut cert = Cursor::new(cert);
         let cert =
-            certs(&mut cert).map_err(|_| Error::msg(ErrorKind::InvalidInput, "Cert is invalid"))?;
+            certs(&mut cert).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
 
         let mut config = ServerConfig::new(NoClientAuth::new());
         config
-            .set_single_cert(cert, private)
-            .map_err(|_| Error::from("Couldn't configure Config with Cert and Private"))?;
+            .set_single_cert(cert, private)?;
         config.set_protocols(&["h2".into(), "http/1.1".into()]);
 
         Ok(Arc::new(config))
     }
 
-    async fn load_cert(&self) -> Result<TlsAcceptor, Box<dyn std::error::Error + Send + Sync>> {
+    async fn load_cert(&self) -> Result<TlsAcceptor> {
         let new_cert = CertFacade::first_cert(&self.pool).await?;
 
         // could probably be improved
@@ -130,7 +130,7 @@ impl Api {
         http: Option<A>,
         https: Option<A>,
         pool: PgPool,
-    ) -> tokio::io::Result<Self> {
+    ) -> Result<Self> {
         let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
         let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
 
@@ -139,7 +139,7 @@ impl Api {
         Ok(Api { http, https, pool })
     }
 
-    pub async fn spawn(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn spawn(self) -> Result<()> {
         let pool = self.pool.clone();
         let routes = warp::path("register")
             .and(warp::post())

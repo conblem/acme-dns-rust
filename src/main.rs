@@ -1,10 +1,10 @@
+use anyhow::Result;
 use futures_util::TryFutureExt;
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
 use std::env;
-use std::error::Error;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
 
@@ -27,12 +27,12 @@ fn main() {
     SimpleLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
     if let Err(e) = run() {
-        log::error!("{}", e);
-        panic!("{}", e);
+        log::error!("{:?}", e);
+        std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
+fn run() -> Result<()> {
     let config_path = env::args().nth(1);
     let config = config::config(config_path)?;
 
@@ -49,7 +49,6 @@ fn run() -> Result<(), Box<dyn Error>> {
             config.api.https.as_deref(),
             pool.clone(),
         )
-        .map_err(From::from)
         .and_then(Api::spawn);
 
         let persist = DatabasePersist::new(pool.clone(), runtime.handle());

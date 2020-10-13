@@ -5,6 +5,7 @@ use std::io::ErrorKind;
 use std::time::Duration;
 use tokio::time::Interval;
 use uuid::Uuid;
+use anyhow::Result;
 
 use crate::acme::DatabasePersist;
 use crate::domain::{Domain, DomainFacade};
@@ -154,27 +155,6 @@ pub struct CertManager {
     directory: Directory<DatabasePersist>,
 }
 
-impl CertManager {
-    pub async fn new(
-        pool: PgPool,
-        persist: DatabasePersist,
-        acme: String,
-    ) -> Result<Self, Box<dyn Error>> {
-        let directory = tokio::task::spawn_blocking(move || {
-            Directory::from_url(persist, DirectoryUrl::Other(&acme))
-        })
-        .await??;
-
-        Ok(CertManager { pool, directory })
-    }
-
-    // maybe useless function
-    fn interval() -> Interval {
-        // use constant
-        tokio::time::interval(Duration::from_secs(3600))
-    }
-}
-
 fn error(kind: ErrorKind, message: &str) -> std::io::Error {
     let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
     std::io::Error::new(kind, error)
@@ -185,7 +165,26 @@ fn other_error(message: &str) -> std::io::Error {
 }
 
 impl CertManager {
-    pub async fn spawn(self) -> Result<(), Box<dyn Error>> {
+    pub async fn new(
+        pool: PgPool,
+        persist: DatabasePersist,
+        acme: String,
+    ) -> Result<Self> {
+        let directory = tokio::task::spawn_blocking(move || {
+            Directory::from_url(persist, DirectoryUrl::Other(&acme))
+        })
+            .await??;
+
+        Ok(CertManager { pool, directory })
+    }
+
+    // maybe useless function
+    fn interval() -> Interval {
+        // use constant
+        tokio::time::interval(Duration::from_secs(3600))
+    }
+
+    pub async fn spawn(self) -> Result<()> {
         tokio::spawn(async move {
             let mut interval = CertManager::interval();
             loop {

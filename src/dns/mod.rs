@@ -1,8 +1,8 @@
-use std::error::Error;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tokio::runtime::Runtime;
 use trust_dns_server::authority::{AuthorityObject, Catalog};
 use trust_dns_server::ServerFuture;
+use anyhow::Result;
 
 mod authority;
 mod parse;
@@ -29,7 +29,7 @@ impl<'a, A: ToSocketAddrs> DNS<'a, A> {
         }
     }
 
-    pub async fn spawn(mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn spawn(mut self) -> Result<()> {
         let udp = UdpSocket::bind(self.addr).await?;
         self.server.register_socket(udp, self.runtime);
 
