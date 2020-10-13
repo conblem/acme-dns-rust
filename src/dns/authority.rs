@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use futures_util::FutureExt;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -17,7 +18,6 @@ use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
-use anyhow::anyhow;
 
 use super::parse::parse;
 use crate::cert::CertFacade;

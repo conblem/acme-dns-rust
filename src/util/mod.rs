@@ -1,5 +1,5 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::io;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const fn to_i64(val: &u64) -> i64 {
     i64::from_ne_bytes(val.to_ne_bytes())

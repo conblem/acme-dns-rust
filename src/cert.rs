@@ -1,11 +1,11 @@
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
+use anyhow::Result;
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::error::Error;
 use std::io::ErrorKind;
 use std::time::Duration;
 use tokio::time::Interval;
 use uuid::Uuid;
-use anyhow::Result;
 
 use crate::acme::DatabasePersist;
 use crate::domain::{Domain, DomainFacade};
@@ -165,15 +165,11 @@ fn other_error(message: &str) -> std::io::Error {
 }
 
 impl CertManager {
-    pub async fn new(
-        pool: PgPool,
-        persist: DatabasePersist,
-        acme: String,
-    ) -> Result<Self> {
+    pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> Result<Self> {
         let directory = tokio::task::spawn_blocking(move || {
             Directory::from_url(persist, DirectoryUrl::Other(&acme))
         })
-            .await??;
+        .await??;
 
         Ok(CertManager { pool, directory })
     }

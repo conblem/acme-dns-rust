@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Error, Result};
 use futures_util::future::OptionFuture;
 use futures_util::stream::TryStream;
 use futures_util::FutureExt;
@@ -14,11 +15,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
 use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
-use anyhow::{Result, anyhow};
 
 use crate::cert::{Cert, CertFacade};
 use crate::domain::{Domain, DomainFacade};
-use crate::util::error;
 
 struct Acceptor {
     pool: PgPool,
@@ -35,9 +34,7 @@ impl Acceptor {
         }
     }
 
-    fn create_server_config(
-        db_cert: &mut Cert,
-    ) -> Result<Arc<ServerConfig>> {
+    fn create_server_config(db_cert: &mut Cert) -> Result<Arc<ServerConfig>> {
         let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
             (Some(ref mut private), Some(ref mut cert)) => (private, cert),
             _ => return Err(anyhow!("Cert has no Cert or Private")),
@@ -51,12 +48,10 @@ impl Acceptor {
             .ok_or_else(|| anyhow!("Private Vec is empty {:?}", privates))?;
 
         let mut cert = Cursor::new(cert);
-        let cert =
-            certs(&mut cert).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
+        let cert = certs(&mut cert).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
 
         let mut config = ServerConfig::new(NoClientAuth::new());
-        config
-            .set_single_cert(cert, private)?;
+        config.set_single_cert(cert, private)?;
         config.set_protocols(&["h2".into(), "http/1.1".into()]);
 
         Ok(Arc::new(config))
@@ -83,10 +78,8 @@ impl Acceptor {
 fn stream(
     listener: TcpListener,
     pool: PgPool,
-) -> impl TryStream<
-    Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    Error = Box<dyn std::error::Error + Send + Sync>,
-> + Send {
+) -> impl TryStream<Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error = Error> + Send
+{
     let acceptor = Acceptor::new(pool);
     let acceptor_stream =
         futures_util::stream::unfold(acceptor, |acc| async { Some((acc.load_cert().await, acc)) });

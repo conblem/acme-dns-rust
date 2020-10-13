@@ -1,8 +1,8 @@
+use anyhow::Result;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tokio::runtime::Runtime;
 use trust_dns_server::authority::{AuthorityObject, Catalog};
 use trust_dns_server::ServerFuture;
-use anyhow::Result;
 
 mod authority;
 mod parse;
