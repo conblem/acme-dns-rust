@@ -41,7 +41,7 @@ pub(super) fn parse(
             Ok(name) => name,
             Err(_) => {
                 log::error!("Could not parse name {}, skipping", name);
-                continue
+                continue;
             }
         };
         name.set_fqdn(true);
