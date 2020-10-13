@@ -1,8 +1,6 @@
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
-use std::error::Error;
-use std::io::ErrorKind;
 use std::time::Duration;
 use tokio::time::Interval;
 use uuid::Uuid;
@@ -94,7 +92,7 @@ impl CertFacade {
         Ok(())
     }
 
-    pub async fn start(pool: &PgPool) -> Result<Option<Cert>, sqlx::Error> {
+    pub async fn start(pool: &PgPool) -> Result<Option<Cert>> {
         let mut transaction = pool.begin().await?;
 
         let cert = CertFacade::first_cert(&mut transaction).await?;
@@ -155,15 +153,6 @@ pub struct CertManager {
     directory: Directory<DatabasePersist>,
 }
 
-fn error(kind: ErrorKind, message: &str) -> std::io::Error {
-    let error: Box<dyn Error + Send + Sync> = From::from(message.to_string());
-    std::io::Error::new(kind, error)
-}
-
-fn other_error(message: &str) -> std::io::Error {
-    error(ErrorKind::Other, message)
-}
-
 impl CertManager {
     pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> Result<Self> {
         let directory = tokio::task::spawn_blocking(move || {
@@ -200,10 +189,12 @@ impl CertManager {
         Ok(())
     }
 
-    async fn test(&self) -> Result<(), Box<dyn Error>> {
+    async fn test(&self) -> Result<()> {
+        // maybe context is not needed here
         let mut memory_cert = CertFacade::start(&self.pool)
-            .await?
-            .ok_or_else(|| other_error("Cert not found"))?;
+            .await
+            .context("Start failed")?
+            .ok_or_else(|| anyhow!("Start did not return cert"))?;
 
         // todo: improve
         let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
@@ -220,7 +211,7 @@ impl CertManager {
         let mut auths = order.authorizations()?;
         let call = auths
             .pop()
-            .ok_or_else(|| other_error("couldn't unpack auths"))?
+            .ok_or_else(|| anyhow!("couldn't unpack auths"))?
             .dns_challenge();
         let proof = call.dns_proof();
 

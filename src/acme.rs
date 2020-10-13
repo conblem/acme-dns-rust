@@ -4,7 +4,7 @@ use sqlx::{Pool, Postgres};
 use tokio::runtime::Handle;
 use tokio::stream::StreamExt;
 
-use crate::util::to_i64;
+use crate::util::{error, to_i64};
 
 #[derive(Clone)]
 pub struct DatabasePersist {
@@ -41,11 +41,7 @@ impl Persist for DatabasePersist {
                 .bind(value)
                 .execute(&self.pool);
 
-        self.handle
-            .block_on(query)
-            .map_err(|err| acme_lib::Error::from(err.to_string()))?;
-
-        Ok(())
+        self.handle.block_on(query).map(|_| ()).map_err(error)
     }
 
     fn get<'a>(&self, key: &PersistKey<'a>) -> acme_lib::Result<Option<Vec<u8>>> {
@@ -59,10 +55,9 @@ impl Persist for DatabasePersist {
                 .fetch(&self.pool);
 
         match self.handle.block_on(rows.try_next()) {
-            Ok(Some(row)) => row.try_get("value"),
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(acme_lib::Error::from(e.to_string())),
+            Ok(Some(row)) => row.try_get("value").map_err(error),
+            Ok(None) => Ok(None),
+            Err(e) => Err(error(e)),
         }
-        .map_err(|err| acme_lib::Error::from(err.to_string()))
     }
 }

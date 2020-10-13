@@ -8,7 +8,6 @@ use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
 use std::io::Cursor;
-use std::io::ErrorKind;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};

@@ -1,9 +1,8 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use futures_util::FutureExt;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::future::Future;
-use std::io;
 use std::net::IpAddr::V4;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -13,7 +12,6 @@ use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
     Authority, LookupError, LookupRecords, MessageRequest, UpdateResult, ZoneType,
 };
-use trust_dns_server::proto::op::ResponseCode;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::record_data::RData;
@@ -55,7 +53,7 @@ impl DatabaseAuthority {
     }
 }
 
-async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupError> {
+async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> {
     let name = record_set.name();
     let records = record_set
         .records_without_rrsigs()
@@ -64,15 +62,13 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
 
     let cname = match records {
         Some(RData::CNAME(cname)) => cname,
-        _ => return Err(LookupError::ResponseCode(ResponseCode::ServFail)),
+        _ => return Ok(None),
     };
 
     // hack tokio expects a socket addr
     let addr = format!("{}:80", cname);
     log::debug!("resolving following cname ip {}", addr);
-    let hosts = tokio::net::lookup_host(addr)
-        .await
-        .map_err(|_| LookupError::ResponseCode(ResponseCode::ServFail))?;
+    let hosts = tokio::net::lookup_host(addr).await?;
 
     let mut record_set = RecordSet::new(name, RecordType::A, 0);
     for host in hosts {
@@ -85,10 +81,10 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Arc<RecordSet>, LookupEr
 
     if record_set.is_empty() {
         log::debug!("dns lookup returned no ipv4 records");
-        return Err(LookupError::ResponseCode(ResponseCode::ServFail));
+        return Ok(None);
     }
 
-    Ok(Arc::new(record_set))
+    Ok(Some(Arc::new(record_set)))
 }
 
 impl DatabaseAuthorityInner {
@@ -96,7 +92,7 @@ impl DatabaseAuthorityInner {
         &self,
         name: &Name,
         query_type: &RecordType,
-    ) -> Result<Option<LookupRecords>, LookupError> {
+    ) -> Result<Option<LookupRecords>> {
         log::debug!("starting prelookup for {}, {}", name, query_type);
         let records = match self.records.get(name) {
             Some(records) => records,
@@ -104,33 +100,39 @@ impl DatabaseAuthorityInner {
         };
 
         let record_set = match (records.get(query_type), records.get(&RecordType::CNAME)) {
-            (Some(record_set), _) => Arc::clone(record_set),
+            (Some(record_set), _) => Some(Arc::clone(record_set)),
             // if no A Record can be found, see if maybe it is configured as a cname
             (None, Some(record_set)) if *query_type == RecordType::A => {
                 lookup_cname(record_set).await?
             }
             (None, _) => return Ok(None),
         };
-        log::debug!("pre lookup resolved: {:?}", record_set);
-        Ok(Some(LookupRecords::new(
-            false,
-            self.supported_algorithms,
-            record_set,
-        )))
+
+        match record_set {
+            Some(record_set) => {
+                log::debug!("pre lookup resolved: {:?}", record_set);
+                Ok(Some(LookupRecords::new(
+                    false,
+                    self.supported_algorithms,
+                    record_set,
+                )))
+            }
+            None => Ok(None),
+        }
     }
 
-    async fn acme_challenge(&self, name: Name) -> Result<LookupRecords, LookupError> {
+    async fn acme_challenge(&self, name: Name) -> Result<LookupRecords> {
         let pool = &self.pool;
 
         let cert = match CertFacade::first_cert(pool).await {
             Ok(Some(cert)) => cert,
-            Ok(None) => return Err(error(anyhow!("First cert not found"))),
-            Err(e) => return Err(error(e)),
+            Ok(None) => return Err(anyhow!("First cert not found")),
+            Err(e) => return Err(e.into()),
         };
         let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
             Ok(Some(domain)) => domain,
-            Ok(None) => return Err(error(anyhow!("Domain not found {}", cert.domain))),
-            Err(e) => return Err(error(e)),
+            Ok(None) => return Err(anyhow!("Domain not found {}", cert.domain)),
+            Err(e) => return Err(e.into()),
         };
 
         // todo: use match txt can be empty
@@ -188,22 +190,23 @@ impl Authority for DatabaseAuthority {
                 return Ok(LookupRecords::Empty);
             }
 
-            // todo: don't abort on error still continue with normal lookup
-            if let Some(pre) = authority.lookup_pre(&name, &query_type).await? {
-                return Ok(pre);
+            // no error handling needed we just try the other lookups
+            match authority.lookup_pre(&name, &query_type).await {
+                Ok(Some(pre)) => return Ok(pre),
+                Err(e) => log::error!("Error on pre lookup {:?}", e),
+                _ => {}
             }
 
             let first = name[0].to_string();
             if first == "_acme-challenge" {
-                return authority.acme_challenge(name).await;
+                return authority.acme_challenge(name).await.map_err(error);
             }
 
-            let pool = &authority.pool;
-
-            let txt = match DomainFacade::find_by_id(pool, &first).await {
+            // todo: improve error handling
+            let txt = match DomainFacade::find_by_id(&authority.pool, &first).await {
                 Ok(Some(Domain { txt: Some(txt), .. })) => txt,
-                Ok(None) => return Err(LookupError::Io(io::Error::from(io::ErrorKind::NotFound))),
-                Err(e) => return Err(LookupError::Io(io::Error::new(io::ErrorKind::Other, e))),
+                Ok(None) => return Err(error(anyhow!("{} not found", first))),
+                Err(e) => return Err(error(e)),
                 _ => return Ok(LookupRecords::Empty),
             };
             let txt = TXT::new(vec![txt]);
