@@ -30,13 +30,20 @@ fn parse_record(
     Some(record_set)
 }
 
+// todo: improve error handling and naming
 pub(super) fn parse(
     records: HashMap<String, Vec<Vec<String>>>,
 ) -> Option<HashMap<Name, HashMap<RecordType, Arc<RecordSet>>>> {
     let mut result: HashMap<Name, HashMap<RecordType, Arc<RecordSet>>> = Default::default();
 
     for (name, val) in records {
-        let mut name = Name::from_str(&name).ok()?;
+        let mut name = match Name::from_str(&name) {
+            Ok(name) => name,
+            Err(_) => {
+                log::error!("Could not parse name {}, skipping", name);
+                continue
+            }
+        };
         name.set_fqdn(true);
         for val in val {
             let mut iter = val.into_iter();
