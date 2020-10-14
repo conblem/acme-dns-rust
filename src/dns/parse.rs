@@ -61,3 +61,34 @@ pub(super) fn parse(
     log::debug!("records parsed {:?}", result);
     Some(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::dns::parse::parse_record;
+    use std::str::FromStr;
+    use trust_dns_server::proto::rr::{Name, RData, RecordType};
+
+    #[test]
+    fn parse_txt_record_works() {
+        let name = Name::from_str("google.com").expect("Unable to parse name");
+        let data = vec!["Hallo".to_string()].into_iter();
+        let record = parse_record(&name, "TXT", 100, data).expect("Could not parse record");
+
+        assert!(!record.is_empty());
+        assert_eq!(RecordType::TXT, record.record_type());
+
+        let record = record
+            .records_without_rrsigs()
+            .next()
+            .expect("There is no record");
+        assert_eq!(RecordType::TXT, record.record_type());
+        assert_eq!(100, record.ttl());
+
+        let txt = match record.rdata() {
+            RData::TXT(txt) => txt,
+            _ => panic!("RData is not TXT"),
+        };
+
+        assert_eq!(b"Hallo", &*txt.txt_data()[0])
+    }
+}
