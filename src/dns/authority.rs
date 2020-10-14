@@ -237,6 +237,7 @@ mod tests {
     use trust_dns_server::proto::rr::{Name, Record, RData, RecordType};
     use std::str::FromStr;
     use crate::dns::authority::lookup_cname;
+    use std::net::Ipv4Addr;
 
     #[tokio::test]
     async fn lookup_cname_works() {
@@ -257,7 +258,7 @@ mod tests {
             _ => panic!("Resolved record is not of a type")
         };
 
-        let expected = "93.184.216.34".parse();
-        assert_eq!(&expected, Ok(ip));
+        let expected: Ipv4Addr = "93.184.216.34".parse().expect("Could not parse ip");
+        assert_eq!(&expected, ip);
     }
 }
