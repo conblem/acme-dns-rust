@@ -121,9 +121,37 @@ mod tests {
 
         let ip = match record.rdata() {
             RData::A(ip) => ip,
-            _ => panic!("RData is not TXT"),
+            _ => panic!("RData is not A"),
         };
 
         assert_eq!(&data, ip)
+    }
+
+    // there is only one cname record supported
+    #[test]
+    fn parse_cname_record_works() {
+        let name = Name::from_str("google.com").expect("Unable to parse name");
+        let data = vec!["test.com".to_string()].into_iter();
+        let record = parse_record(&name, "CNAME", 100, data).expect("Could not parse record");
+
+        assert!(!record.is_empty());
+        assert_eq!(RecordType::CNAME, record.record_type());
+
+        let record = record
+            .records_without_rrsigs()
+            .next()
+            .expect("There is no record");
+
+        assert_eq!(RecordType::CNAME, record.record_type());
+        assert_eq!(100, record.ttl());
+
+        let actual = match record.rdata() {
+            RData::CNAME(actual) => actual,
+            _ => panic!("RData is not CNAME"),
+        };
+
+        let mut expected = Name::from_str("test.com").expect("Is not a valid name");
+        expected.set_fqdn(true);
+        assert_eq!(&expected, actual)
     }
 }
