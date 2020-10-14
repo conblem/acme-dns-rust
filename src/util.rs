@@ -26,6 +26,7 @@ pub(crate) fn error<E: From<io::Error>>(err: impl Into<anyhow::Error>) -> E {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
     use std::thread;
     use std::time::Duration;
 
@@ -49,6 +50,38 @@ mod tests {
     fn now_works() {
         let actual = now();
         thread::sleep(Duration::from_millis(1500));
-        assert_ne!(actual, now())
+        assert!(actual < now())
+    }
+
+    #[test]
+    fn io_error_works() {
+        let expected = io::Error::new(io::ErrorKind::InvalidData, anyhow!("Hallo"));
+        let err = io::Error::new(io::ErrorKind::InvalidData, anyhow!("Hallo"));
+
+        let actual = match error(err) {
+            acme_lib::Error::Io(err) => err,
+            _ => panic!("Cannot match err"),
+        };
+
+        assert_eq!(format!("{:?}", expected), format!("{:?}", actual));
+    }
+
+    #[test]
+    fn error_works() {
+        let expected = anyhow!("test error");
+
+        let actual = match error(anyhow!("test error")) {
+            acme_lib::Error::Io(err) => err,
+            _ => panic!("Cannot match err"),
+        };
+
+        assert_eq!(io::ErrorKind::Other, actual.kind());
+
+        // is not equal as original error gast boxed by io error
+        assert_ne!(format!("{:?}", expected), format!("{:?}", actual));
+
+        // here we access the actual inner error
+        let actual = actual.into_inner().expect("Error has no inner error");
+        assert_eq!(format!("{:?}", expected), format!("{:?}", actual));
     }
 }
