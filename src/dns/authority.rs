@@ -231,3 +231,33 @@ impl Authority for DatabaseAuthority {
         futures_util::future::ok(LookupRecords::Empty).boxed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use trust_dns_server::proto::rr::{Name, Record, RData, RecordType};
+    use std::str::FromStr;
+    use crate::dns::authority::lookup_cname;
+
+    #[tokio::test]
+    async fn lookup_cname_works() {
+        let name = Name::from_str("test.domain.com").expect("Could not parse name");
+        let lookup = Name::from_str("example.com").expect("Could not parse name");
+        let record_set = Record::from_rdata(name, 100, RData::CNAME(lookup)).into();
+
+        let actual = match lookup_cname(&record_set).await {
+            Ok(Some(actual)) => actual,
+            _ => panic!("Could not resolve cname")
+        };
+
+        let record = actual.records_without_rrsigs().next().expect("no records in recordset");
+        assert_eq!(RecordType::A, record.record_type());
+
+        let ip = match record.rdata() {
+            RData::A(ip) => ip,
+            _ => panic!("Resolved record is not of a type")
+        };
+
+        let expected = "93.184.216.34".parse();
+        assert_eq!(&expected, Ok(ip));
+    }
+}
