@@ -15,7 +15,7 @@ fn parse_record(
         "TXT" => |val| Some(RData::TXT(TXT::new(vec![val]))),
         "A" => |val| Some(RData::A(val.parse().ok()?)),
         "CNAME" => |val| Some(RData::CNAME(Name::from_str(&val).ok()?)),
-        _ => None?,
+        _ => return None,
     };
 
     let mut iter = value.flat_map(record);
@@ -153,5 +153,13 @@ mod tests {
         let mut expected = Name::from_str("test.com").expect("Is not a valid name");
         expected.set_fqdn(true);
         assert_eq!(&expected, actual)
+    }
+
+    #[test]
+    fn parse_invalid_record_does_not_work() {
+        let name = Name::from_str("google.com").expect("Unable to parse name");
+        let data = vec!["test.com".to_string()].into_iter();
+        let records = parse_record(&name, "ALIAS", 100, data);
+        assert_eq!(None, records);
     }
 }
