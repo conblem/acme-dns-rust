@@ -4,7 +4,7 @@ use std::sync::Arc;
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::{Name, RData, Record, RecordSet, RecordType};
 
-// use result instead of error
+// todo: use result instead of option
 fn parse_record(
     name: &Name,
     record_type: &str,
@@ -65,30 +65,65 @@ pub(super) fn parse(
 #[cfg(test)]
 mod tests {
     use crate::dns::parse::parse_record;
+    use std::net::Ipv4Addr;
     use std::str::FromStr;
-    use trust_dns_server::proto::rr::{Name, RData, RecordType};
+    use trust_dns_server::proto::rr::{Name, RData, Record, RecordType};
 
     #[test]
     fn parse_txt_record_works() {
         let name = Name::from_str("google.com").expect("Unable to parse name");
-        let data = vec!["Hallo".to_string()].into_iter();
+        let data = vec!["Hallo".to_string(), "Welt".to_string()].into_iter();
         let record = parse_record(&name, "TXT", 100, data).expect("Could not parse record");
 
         assert!(!record.is_empty());
         assert_eq!(RecordType::TXT, record.record_type());
 
-        let record = record
-            .records_without_rrsigs()
-            .next()
-            .expect("There is no record");
+        let mut records = record.records_without_rrsigs();
+        let record = records.next().expect("There is no record");
+        compare_txt(record, 100, "Hallo");
+
+        let record = records.next().expect("There is no record");
+        compare_txt(record, 100, "Welt");
+    }
+
+    fn compare_txt(record: &Record, ttl: u32, data: &str) {
         assert_eq!(RecordType::TXT, record.record_type());
-        assert_eq!(100, record.ttl());
+        assert_eq!(ttl, record.ttl());
 
         let txt = match record.rdata() {
             RData::TXT(txt) => txt,
             _ => panic!("RData is not TXT"),
         };
 
-        assert_eq!(b"Hallo", &*txt.txt_data()[0])
+        assert_eq!(data.as_bytes(), &*txt.txt_data()[0])
+    }
+
+    #[test]
+    fn parse_a_record_works() {
+        let name = Name::from_str("google.com").expect("Unable to parse name");
+        let data = vec!["1.1.1.1".to_string(), "2.2.2.2".to_string()].into_iter();
+        let record = parse_record(&name, "A", 100, data).expect("Could not parse record");
+
+        assert!(!record.is_empty());
+        assert_eq!(RecordType::A, record.record_type());
+
+        let mut records = record.records_without_rrsigs();
+        let record = records.next().expect("There is no record");
+        compare_a(record, 100, "1.1.1.1".parse().expect("Is not a IP"));
+
+        let record = records.next().expect("There is no record");
+        compare_a(record, 100, "2.2.2.2".parse().expect("Is not a IP"));
+    }
+
+    fn compare_a(record: &Record, ttl: u32, data: Ipv4Addr) {
+        assert_eq!(RecordType::A, record.record_type());
+        assert_eq!(ttl, record.ttl());
+
+        let ip = match record.rdata() {
+            RData::A(ip) => ip,
+            _ => panic!("RData is not TXT"),
+        };
+
+        assert_eq!(&data, ip)
     }
 }
