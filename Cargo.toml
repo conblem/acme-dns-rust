@@ -12,7 +12,7 @@ description = "Acme DNS implementation written in Rust"
 [dependencies]
 log = "0.4"
 sqlx = { version = "0.4.0-beta.1", default-features = false, features = [ "runtime-tokio", "macros", "migrate"] }
-tokio = { version = "0.2", features = ["dns", "tcp", "udp"] }
+tokio = { version = "0.3", features = ["net", "rt-multi-thread", "time", "macros", "rt"] }
 uuid = { version = "0.8", features = ["v4"] }
 simplelog = "0.8"
 bcrypt = "0.8"
@@ -24,7 +24,7 @@ trust-dns-client = "0.19"
 parking_lot = "0.11"
 futures-util = "0.3"
 rustls = "0.18"
-tokio-rustls = "0.14"
+tokio-rustls = "0.20"
 toml = "0.5"
 anyhow = "1.0"
 
