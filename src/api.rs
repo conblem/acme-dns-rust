@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use futures_util::future::OptionFuture;
-use futures_util::stream::TryStream;
+use futures_util::stream::{repeat, TryStream};
 use futures_util::FutureExt;
 use futures_util::{StreamExt, TryStreamExt};
 use parking_lot::RwLock;
@@ -24,13 +24,13 @@ struct Acceptor {
 }
 
 impl Acceptor {
-    fn new(pool: PgPool) -> Self {
+    fn new(pool: PgPool) -> Arc<Self> {
         let server_config = ServerConfig::new(NoClientAuth::new());
 
-        Acceptor {
+        Arc::new(Acceptor {
             pool,
             config: RwLock::new((None, Arc::new(server_config))),
-        }
+        })
     }
 
     fn create_server_config(db_cert: &mut Cert) -> Result<Arc<ServerConfig>> {
@@ -80,8 +80,7 @@ fn stream(
 ) -> impl TryStream<Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error = Error> + Send
 {
     let acceptor = Acceptor::new(pool);
-    let acceptor_stream =
-        futures_util::stream::unfold(acceptor, |acc| async { Some((acc.load_cert().await, acc)) });
+    let acceptor_stream = repeat(acceptor).then(|a| async move { a.load_cert().await });
 
     listener
         .zip(acceptor_stream)
