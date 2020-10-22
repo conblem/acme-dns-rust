@@ -1,16 +1,15 @@
 use anyhow::{anyhow, Result};
-use futures_util::FutureExt;
+use futures_util::TryFutureExt;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use std::future::Future;
 use std::net::IpAddr::V4;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use trust_dns_client::op::LowerQuery;
 use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
-    Authority, LookupError, LookupRecords, MessageRequest, UpdateResult, ZoneType,
+    AuthorityObject, BoxedLookupFuture, LookupObject, LookupRecords, MessageRequest,
+    UpdateResult, ZoneType,
 };
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::TXT;
@@ -145,10 +144,7 @@ impl DatabaseAuthorityInner {
 }
 
 #[allow(dead_code)]
-impl Authority for DatabaseAuthority {
-    type Lookup = LookupRecords;
-    type LookupFuture = Pin<Box<dyn Future<Output = Result<Self::Lookup, LookupError>> + Send>>;
-
+impl AuthorityObject for DatabaseAuthority {
     fn zone_type(&self) -> ZoneType {
         ZoneType::Master
     }
@@ -171,8 +167,8 @@ impl Authority for DatabaseAuthority {
         _rtype: RecordType,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> Self::LookupFuture {
-        futures_util::future::ok(LookupRecords::Empty).boxed()
+    ) -> BoxedLookupFuture {
+        BoxedLookupFuture::empty()
     }
 
     fn search(
@@ -180,46 +176,48 @@ impl Authority for DatabaseAuthority {
         query: &LowerQuery,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> Self::LookupFuture {
+    ) -> BoxedLookupFuture {
         let authority = Arc::clone(&self.0);
         let name = Name::from(query.name());
         let query_type = query.query_type();
 
-        async move {
-            if name.is_empty() {
-                return Ok(LookupRecords::Empty);
+        BoxedLookupFuture::from(
+            async move {
+                if name.is_empty() {
+                    return Ok(LookupRecords::Empty);
+                }
+
+                // no error handling needed we just try the other lookups
+                match authority.lookup_pre(&name, &query_type).await {
+                    Ok(Some(pre)) => return Ok(pre),
+                    Err(e) => log::error!("Error on pre lookup {:?}", e),
+                    _ => {}
+                }
+
+                let first = name[0].to_string();
+                if first == "_acme-challenge" {
+                    return authority.acme_challenge(name).await.map_err(error);
+                }
+
+                // todo: improve error handling
+                let txt = match DomainFacade::find_by_id(&authority.pool, &first).await {
+                    Ok(Some(Domain { txt: Some(txt), .. })) => txt,
+                    Ok(None) => return Err(error(anyhow!("{} not found", first))),
+                    Err(e) => return Err(error(e)),
+                    _ => return Ok(LookupRecords::Empty),
+                };
+                let txt = TXT::new(vec![txt]);
+                let record = Record::from_rdata(name, 100, RData::TXT(txt));
+                let record_set = Arc::new(RecordSet::from(record));
+
+                Ok(LookupRecords::new(
+                    false,
+                    authority.supported_algorithms,
+                    record_set,
+                ))
             }
-
-            // no error handling needed we just try the other lookups
-            match authority.lookup_pre(&name, &query_type).await {
-                Ok(Some(pre)) => return Ok(pre),
-                Err(e) => log::error!("Error on pre lookup {:?}", e),
-                _ => {}
-            }
-
-            let first = name[0].to_string();
-            if first == "_acme-challenge" {
-                return authority.acme_challenge(name).await.map_err(error);
-            }
-
-            // todo: improve error handling
-            let txt = match DomainFacade::find_by_id(&authority.pool, &first).await {
-                Ok(Some(Domain { txt: Some(txt), .. })) => txt,
-                Ok(None) => return Err(error(anyhow!("{} not found", first))),
-                Err(e) => return Err(error(e)),
-                _ => return Ok(LookupRecords::Empty),
-            };
-            let txt = TXT::new(vec![txt]);
-            let record = Record::from_rdata(name, 100, RData::TXT(txt));
-            let record_set = Arc::new(RecordSet::from(record));
-
-            Ok(LookupRecords::new(
-                false,
-                authority.supported_algorithms,
-                record_set,
-            ))
-        }
-        .boxed()
+            .map_ok(|res| Box::new(res) as Box<dyn LookupObject>),
+        )
     }
 
     fn get_nsec_records(
@@ -227,8 +225,8 @@ impl Authority for DatabaseAuthority {
         _name: &LowerName,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> Self::LookupFuture {
-        futures_util::future::ok(LookupRecords::Empty).boxed()
+    ) -> BoxedLookupFuture {
+        BoxedLookupFuture::empty()
     }
 }
 
