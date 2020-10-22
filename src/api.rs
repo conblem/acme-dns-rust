@@ -80,17 +80,14 @@ fn stream(
 ) -> impl TryStream<Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error = Error> + Send
 {
     let acceptor = Acceptor::new(pool);
-    let acceptor_stream = repeat(acceptor).then(|a| async move { a.load_cert().await });
 
     listener
-        .zip(acceptor_stream)
-        .then(|item| async move {
-            match item {
-                (Ok(stream), Ok(acceptor)) => Ok(acceptor.accept(stream).await?),
-                (Err(e), _) => Err(e.into()),
-                (_, Err(e)) => Err(e),
-            }
+        .zip(repeat(acceptor))
+        .map(|(stream, acceptor)| async move {
+            let acceptor = acceptor.load_cert().await?;
+            Ok(acceptor.accept(stream?).await?)
         })
+        .buffer_unordered(100)
         .inspect_err(|err| log::error!("Stream error: {}", err))
         .filter(|stream| futures_util::future::ready(stream.is_ok()))
 }
