@@ -8,8 +8,8 @@ use std::sync::Arc;
 use trust_dns_client::op::LowerQuery;
 use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
-    AuthorityObject, BoxedLookupFuture, LookupObject, LookupRecords, MessageRequest,
-    UpdateResult, ZoneType,
+    AuthorityObject, BoxedLookupFuture, LookupObject, LookupRecords, MessageRequest, UpdateResult,
+    ZoneType,
 };
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::TXT;
