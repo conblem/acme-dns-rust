@@ -7,8 +7,6 @@ use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
-use std::io::Cursor;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
@@ -33,21 +31,20 @@ impl Acceptor {
         })
     }
 
-    fn create_server_config(db_cert: &mut Cert) -> Result<Arc<ServerConfig>> {
-        let (private, cert) = match (&mut db_cert.private, &mut db_cert.cert) {
-            (Some(ref mut private), Some(ref mut cert)) => (private, cert),
+    fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
+        let (private, cert) = match (&db_cert.private, &db_cert.cert) {
+            (Some(ref private), Some(ref cert)) => (private, cert),
             _ => return Err(anyhow!("Cert has no Cert or Private")),
         };
 
-        let mut private = Cursor::new(private);
-        let mut privates = pkcs8_private_keys(&mut private)
+        let mut privates = pkcs8_private_keys(&mut private.as_bytes())
             .map_err(|_| anyhow!("Private is invalid {:?}", private))?;
         let private = privates
             .pop()
             .ok_or_else(|| anyhow!("Private Vec is empty {:?}", privates))?;
 
-        let mut cert = Cursor::new(cert);
-        let cert = certs(&mut cert).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
+        let cert =
+            certs(&mut cert.as_bytes()).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
 
         let mut config = ServerConfig::new(NoClientAuth::new());
         config.set_single_cert(cert, private)?;
@@ -57,18 +54,22 @@ impl Acceptor {
     }
 
     async fn load_cert(&self) -> Result<TlsAcceptor> {
-        let new_cert = CertFacade::first_cert(&self.pool).await?;
+        let new_cert = CertFacade::first_cert(&self.pool).await;
 
-        // could probably be improved
-        let mut db_cert = match (new_cert, self.config.read().deref()) {
-            (Some(new_cert), (Some(cert), server_config)) if &new_cert == cert => {
-                return Ok(TlsAcceptor::from(Arc::clone(server_config)))
-            }
-            (Some(new_cert), _) => new_cert,
+        let db_cert = match (new_cert, &*self.config.read()) {
+            (Ok(Some(new_cert)), (cert, _)) if Some(&new_cert) != cert.as_ref() => new_cert,
             (_, (_, server_config)) => return Ok(TlsAcceptor::from(Arc::clone(server_config))),
         };
 
-        let server_config = Acceptor::create_server_config(&mut db_cert)?;
+        let server_config = match Acceptor::create_server_config(&db_cert) {
+            Ok(server_config) => server_config,
+            Err(e) => {
+                log::error!("{:?}", e);
+                let (_, server_config) = &*self.config.read();
+                return Ok(TlsAcceptor::from(Arc::clone(server_config)));
+            }
+        };
+
         *self.config.write() = (Some(db_cert), Arc::clone(&server_config));
         Ok(TlsAcceptor::from(server_config))
     }
@@ -83,12 +84,14 @@ fn stream(
 
     listener
         .zip(repeat(acceptor))
-        .map(|(stream, acceptor)| async move {
-            let acceptor = acceptor.load_cert().await?;
-            Ok(acceptor.accept(stream?).await?)
+        .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
+        .err_into()
+        .map_ok(|(conn, acceptor)| async move {
+            let tls = acceptor.load_cert().await?;
+            Ok(tls.accept(conn).await?)
         })
-        .buffer_unordered(100)
-        .inspect_err(|err| log::error!("Stream error: {}", err))
+        .try_buffer_unordered(100)
+        .inspect_err(|err| log::error!("Stream error: {:?}", err))
         .filter(|stream| futures_util::future::ready(stream.is_ok()))
 }
 
