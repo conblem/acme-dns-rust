@@ -62,7 +62,8 @@ pub(super) fn parse(
     Some(result)
 }
 
-#[cfg(test)]
+// todo: fix this test on ci
+//#[cfg(test)]
 mod tests {
     use crate::dns::parse::parse_record;
     use std::net::Ipv4Addr;
@@ -98,8 +99,7 @@ mod tests {
         assert_eq!(data.as_bytes(), &*txt.txt_data()[0])
     }
 
-    // todo: fix this test on ci
-    //#[test]
+    #[test]
     fn parse_a_record_works() {
         let name = Name::from_str("google.com").expect("Unable to parse name");
         let data = vec!["1.1.1.1".to_string(), "2.2.2.2".to_string()].into_iter();
