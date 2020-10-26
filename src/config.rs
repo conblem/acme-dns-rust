@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use tracing::info;
+use tracing::{debug, info, info_span};
 
 #[derive(Deserialize, Debug)]
 pub struct Api {
@@ -35,17 +35,23 @@ pub struct Config {
 const DEFAULT_CONFIG_PATH: &str = "config.toml";
 
 // is not async so we can use it to load settings for tokio runtime
-pub fn config(config_path: Option<String>) -> Result<Config> {
+pub fn load_config(config_path: Option<String>) -> Result<Config> {
     let config_path = config_path.as_deref().unwrap_or(DEFAULT_CONFIG_PATH);
+
+    let span = info_span!("load_config", config_path);
+    let _enter = span.enter();
+
     let mut file = File::open(config_path)?;
+    debug!(?file, "Opened file");
+
     let mut bytes = vec![];
     file.read_to_end(&mut bytes)?;
+    debug!(file_length = bytes.len(), "Read file");
 
     let config = toml::de::from_slice::<Config>(&bytes)?;
-
     // redact db information
     let config_str = format!("{:?}", config).replace(&config.general.db, "******");
-    info!("Loaded {}", config_str);
+    info!(config = %config_str, "Deserialized config");
 
     Ok(config)
 }

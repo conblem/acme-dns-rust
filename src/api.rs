@@ -11,7 +11,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
-use tracing::error;
+use tracing::{error, info};
+use tracing_futures::Instrument;
 use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
 
 use crate::cert::{Cert, CertFacade};
@@ -102,18 +103,24 @@ pub struct Api {
     pool: PgPool,
 }
 
+#[tracing::instrument(skip(pool))]
 async fn register(pool: PgPool, domain: Domain) -> Result<reply::Response, Rejection> {
-    let _domain = match DomainFacade::create_domain(&pool, &domain).await {
+    let _domain = match DomainFacade::create_domain(&pool, &domain)
+        .in_current_span()
+        .await
+    {
         Err(e) => {
+            error!("{}", e);
             return Ok(Response::builder()
                 .status(500)
                 .body(e.to_string())
                 .unwrap()
-                .into_response())
+                .into_response());
         }
         Ok(domain) => domain,
     };
 
+    info!("Success for call");
     Ok(Response::new("no error").into_response())
 }
 
@@ -131,7 +138,10 @@ impl Api {
         Ok(Api { http, https, pool })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn spawn(self) -> Result<()> {
+        info!("Starting API spawn");
+
         let pool = self.pool.clone();
         let routes = warp::path("register")
             .and(warp::post())
@@ -141,13 +151,21 @@ impl Api {
 
         let http = self
             .http
+            .map(|http| {
+                info!(?http, "Starting http");
+                http.in_current_span()
+            })
             .map(|http| serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
         let pool = self.pool.clone();
         let https = self
             .https
-            .map(|https| serve(routes).serve_incoming(stream(https, pool)))
+            .map(|https| {
+                info!(?https, "Starting https");
+                stream(https, pool).into_stream().in_current_span()
+            })
+            .map(|https| serve(routes).serve_incoming(https))
             .map(tokio::spawn);
 
         match (https, http) {
