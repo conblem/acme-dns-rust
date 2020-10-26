@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::net::IpAddr::V4;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::{debug, error};
 use trust_dns_client::op::LowerQuery;
 use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
@@ -66,7 +67,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> 
 
     // hack tokio expects a socket addr
     let addr = format!("{}:80", cname);
-    log::debug!("resolving following cname ip {}", addr);
+    debug!("resolving following cname ip {}", addr);
     let hosts = tokio::net::lookup_host(addr).await?;
 
     let mut record_set = RecordSet::new(name, RecordType::A, 0);
@@ -79,7 +80,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> 
     }
 
     if record_set.is_empty() {
-        log::debug!("dns lookup returned no ipv4 records");
+        debug!("dns lookup returned no ipv4 records");
         return Ok(None);
     }
 
@@ -92,7 +93,7 @@ impl DatabaseAuthorityInner {
         name: &Name,
         query_type: &RecordType,
     ) -> Result<Option<LookupRecords>> {
-        log::debug!("starting prelookup for {}, {}", name, query_type);
+        debug!("starting prelookup for {}, {}", name, query_type);
         let records = match self.records.get(name) {
             Some(records) => records,
             None => return Ok(None),
@@ -109,7 +110,7 @@ impl DatabaseAuthorityInner {
 
         match record_set {
             Some(record_set) => {
-                log::debug!("pre lookup resolved: {:?}", record_set);
+                debug!("pre lookup resolved: {:?}", record_set);
                 Ok(Some(LookupRecords::new(
                     false,
                     self.supported_algorithms,
@@ -190,7 +191,7 @@ impl AuthorityObject for DatabaseAuthority {
                 // no error handling needed we just try the other lookups
                 match authority.lookup_pre(&name, &query_type).await {
                     Ok(Some(pre)) => return Ok(pre),
-                    Err(e) => log::error!("Error on pre lookup {:?}", e),
+                    Err(e) => error!("Error on pre lookup {:?}", e),
                     _ => {}
                 }
 

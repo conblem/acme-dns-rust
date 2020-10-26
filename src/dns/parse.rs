@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::{debug, error};
 use trust_dns_server::proto::rr::rdata::TXT;
 use trust_dns_server::proto::rr::{Name, RData, Record, RecordSet, RecordType};
 
@@ -40,7 +41,7 @@ pub(super) fn parse(
         let mut name = match Name::from_str(&name) {
             Ok(name) => name,
             Err(_) => {
-                log::error!("Could not parse name {}, skipping", name);
+                error!("Could not parse name {}, skipping", name);
                 continue;
             }
         };
@@ -58,12 +59,12 @@ pub(super) fn parse(
         }
     }
 
-    log::debug!("records parsed {:?}", result);
+    debug!("records parsed {:?}", result);
     Some(result)
 }
 
 // todo: fix this test on ci
-//#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use crate::dns::parse::parse_record;
     use std::net::Ipv4Addr;

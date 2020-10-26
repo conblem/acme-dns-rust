@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
+use tracing::error;
 use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
 
 use crate::cert::{Cert, CertFacade};
@@ -64,7 +65,7 @@ impl Acceptor {
         let server_config = match Acceptor::create_server_config(&db_cert) {
             Ok(server_config) => server_config,
             Err(e) => {
-                log::error!("{:?}", e);
+                error!("{:?}", e);
                 let (_, server_config) = &*self.config.read();
                 return Ok(TlsAcceptor::from(Arc::clone(server_config)));
             }
@@ -91,7 +92,7 @@ fn stream(
             Ok(tls.accept(conn).await?)
         })
         .try_buffer_unordered(100)
-        .inspect_err(|err| log::error!("Stream error: {:?}", err))
+        .inspect_err(|err| error!("Stream error: {:?}", err))
         .filter(|stream| futures_util::future::ready(stream.is_ok()))
 }
 

@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
+use tracing::info;
 
 #[derive(Deserialize, Debug)]
 pub struct Api {
@@ -44,7 +45,7 @@ pub fn config(config_path: Option<String>) -> Result<Config> {
 
     // redact db information
     let config_str = format!("{:?}", config).replace(&config.general.db, "******");
-    log::info!("Loaded {}", config_str);
+    info!("Loaded {}", config_str);
 
     Ok(config)
 }

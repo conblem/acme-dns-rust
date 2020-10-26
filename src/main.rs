@@ -7,6 +7,7 @@ use sqlx::PgPool;
 use std::env;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
+use tracing::error;
 
 use crate::acme::DatabasePersist;
 use crate::api::Api;
@@ -27,7 +28,7 @@ fn main() {
     SimpleLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
     if let Err(e) = run() {
-        log::error!("{:?}", e);
+        error!("{:?}", e);
         std::process::exit(1);
     }
 }

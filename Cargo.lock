@@ -8,7 +8,6 @@ dependencies = [
  "anyhow",
  "bcrypt",
  "futures-util",
- "log",
  "parking_lot",
  "rustls 0.18.1",
  "serde",
@@ -17,6 +16,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "toml",
+ "tracing",
  "trust-dns-client",
  "trust-dns-server",
  "uuid",
@@ -2051,7 +2051,19 @@ checksum = "f0aae59226cf195d8e74d4b34beae1859257efb4e5fed3f147d2dc2c7d372178"
 dependencies = [
  "cfg-if",
  "log",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80e0ccfc3378da0cce270c946b676a376943f5cd16aeba64568e7939806f4ada"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

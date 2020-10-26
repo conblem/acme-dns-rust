@@ -3,6 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::time::Duration;
 use tokio::time::Interval;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::acme::DatabasePersist;
@@ -178,10 +179,10 @@ impl CertManager {
                     continue;
                 }
                 if let Err(e) = self.test().await {
-                    log::error!("{}", e);
+                    error!("{}", e);
                     continue;
                 }
-                log::info!("Interval successfully passed");
+                info!("Interval successfully passed");
             }
         })
         .await?;
