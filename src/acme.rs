@@ -5,6 +5,7 @@ use tokio::runtime::Handle;
 use tokio::stream::StreamExt;
 
 use crate::util::{error, to_i64};
+use tracing_futures::Instrument;
 
 #[derive(Clone)]
 pub struct DatabasePersist {
@@ -30,6 +31,7 @@ fn persist_kind(kind: &PersistKind) -> &str {
 }
 
 impl Persist for DatabasePersist {
+    #[tracing::instrument(name = "DatabasePersist::put", err, skip(self))]
     fn put<'a>(&self, key: &PersistKey<'a>, value: &[u8]) -> acme_lib::Result<()> {
         let PersistKey { realm, kind, key } = key;
 
@@ -44,6 +46,7 @@ impl Persist for DatabasePersist {
         self.handle.block_on(query).map(|_| ()).map_err(error)
     }
 
+    #[tracing::instrument(name = "DatabasePersist::get", err, skip(self))]
     fn get<'a>(&self, key: &PersistKey<'a>) -> acme_lib::Result<Option<Vec<u8>>> {
         let PersistKey { realm, kind, key } = key;
 
@@ -54,7 +57,7 @@ impl Persist for DatabasePersist {
                 .bind(persist_kind(kind))
                 .fetch(&self.pool);
 
-        match self.handle.block_on(rows.try_next()) {
+        match self.handle.block_on(rows.try_next().in_current_span()) {
             Ok(Some(row)) => row.try_get("value").map_err(error),
             Ok(None) => Ok(None),
             Err(e) => Err(error(e)),

@@ -4,6 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const fn to_i64(val: &u64) -> i64 {
     i64::from_ne_bytes(val.to_ne_bytes())
 }
+pub(crate) const fn to_u64(val: &i64) -> u64 {
+    u64::from_ne_bytes(val.to_ne_bytes())
+}
 
 pub(crate) const HOUR: u64 = 3600;
 pub(crate) fn now() -> u64 {
@@ -42,7 +45,7 @@ mod tests {
 
     fn test_to_i64(expected: u64) {
         let res = to_i64(&expected);
-        let actual = u64::from_ne_bytes(res.to_ne_bytes());
+        let actual = to_u64(&res);
         assert_eq!(expected, actual)
     }
 

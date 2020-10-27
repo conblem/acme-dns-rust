@@ -3,7 +3,8 @@ use anyhow::{anyhow, Context, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::time::Duration;
 use tokio::time::Interval;
-use tracing::{error, info};
+use tracing::{error, info, Span};
+use tracing_futures::Instrument;
 use uuid::Uuid;
 
 use crate::acme::DatabasePersist;
@@ -155,8 +156,11 @@ pub struct CertManager {
 }
 
 impl CertManager {
+    #[tracing::instrument(name = "CertManager::new", skip(pool, persist))]
     pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> Result<Self> {
+        let span = Span::current();
         let directory = tokio::task::spawn_blocking(move || {
+            let _enter = span.enter();
             Directory::from_url(persist, DirectoryUrl::Other(&acme))
         })
         .await??;
@@ -167,24 +171,30 @@ impl CertManager {
     // maybe useless function
     fn interval() -> Interval {
         // use constant
-        tokio::time::interval(Duration::from_secs(3600))
+        tokio::time::interval(Duration::from_secs(HOUR))
     }
 
+    #[tracing::instrument(name = "CertManager::spawn", skip(self))]
     pub async fn spawn(self) -> Result<()> {
-        tokio::spawn(async move {
-            let mut interval = CertManager::interval();
-            loop {
-                interval.tick().await;
-                if true {
-                    continue;
+        tokio::spawn(
+            async move {
+                let mut interval = CertManager::interval();
+                loop {
+                    interval.tick().await;
+                    info!("Started Interval");
+                    if true {
+                        info!("Skipping Interval");
+                        continue;
+                    }
+                    if let Err(e) = self.test().await {
+                        error!("{}", e);
+                        continue;
+                    }
+                    info!("Interval successfully passed");
                 }
-                if let Err(e) = self.test().await {
-                    error!("{}", e);
-                    continue;
-                }
-                info!("Interval successfully passed");
             }
-        })
+            .in_current_span(),
+        )
         .await?;
 
         Ok(())

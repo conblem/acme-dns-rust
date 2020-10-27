@@ -10,6 +10,7 @@ repository = "https://github.com/conblem/acme-dns-rust/"
 description = "Acme DNS implementation written in Rust"
 
 [dependencies]
+prometheus = "0.10"
 tracing = "0.1"
 tracing-subscriber = "0.2"
 tracing-futures = { version = "0.2.4", features = ["futures-03"]}

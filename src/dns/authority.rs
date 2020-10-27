@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::net::IpAddr::V4;
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::field::display;
+use tracing::{debug, error, info, Span};
+use tracing_futures::Instrument;
 use trust_dns_client::op::LowerQuery;
 use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
@@ -53,6 +55,7 @@ impl DatabaseAuthority {
     }
 }
 
+#[tracing::instrument(skip(record_set))]
 async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> {
     let name = record_set.name();
     let records = record_set
@@ -88,15 +91,19 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> 
 }
 
 impl DatabaseAuthorityInner {
+    #[tracing::instrument(err, skip(self, name, query_type))]
     async fn lookup_pre(
         &self,
         name: &Name,
         query_type: &RecordType,
     ) -> Result<Option<LookupRecords>> {
-        debug!("starting prelookup for {}, {}", name, query_type);
+        debug!("Starting Prelookup");
         let records = match self.records.get(name) {
             Some(records) => records,
-            None => return Ok(None),
+            None => {
+                debug!("Empty Prelookup");
+                return Ok(None);
+            }
         };
 
         let record_set = match (records.get(query_type), records.get(&RecordType::CNAME)) {
@@ -105,7 +112,10 @@ impl DatabaseAuthorityInner {
             (None, Some(record_set)) if *query_type == RecordType::A => {
                 lookup_cname(record_set).await?
             }
-            (None, _) => return Ok(None),
+            (None, _) => {
+                debug!("Empty Prelookup");
+                return Ok(None);
+            }
         };
 
         match record_set {
@@ -117,17 +127,20 @@ impl DatabaseAuthorityInner {
                     record_set,
                 )))
             }
-            None => Ok(None),
+            None => {
+                debug!("Empty Prelookup");
+                Ok(None)
+            }
         }
     }
 
+    #[tracing::instrument(skip(self, name))]
     async fn acme_challenge(&self, name: Name) -> Result<LookupRecords> {
         let pool = &self.pool;
 
-        let cert = match CertFacade::first_cert(pool).await {
-            Ok(Some(cert)) => cert,
-            Ok(None) => return Err(anyhow!("First cert not found")),
-            Err(e) => return Err(e.into()),
+        let cert = match CertFacade::first_cert(pool).await? {
+            Some(cert) => cert,
+            None => return Err(anyhow!("First cert not found")),
         };
         let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
             Ok(Some(domain)) => domain,
@@ -181,18 +194,20 @@ impl AuthorityObject for DatabaseAuthority {
         let authority = Arc::clone(&self.0);
         let name = Name::from(query.name());
         let query_type = query.query_type();
+        let span = Span::current();
+        span.record("name", &display(&name));
+        span.record("query_type", &display(&query_type));
 
         BoxedLookupFuture::from(
             async move {
+                info!("Starting lookup");
                 if name.is_empty() {
                     return Ok(LookupRecords::Empty);
                 }
 
                 // no error handling needed we just try the other lookups
-                match authority.lookup_pre(&name, &query_type).await {
-                    Ok(Some(pre)) => return Ok(pre),
-                    Err(e) => error!("Error on pre lookup {:?}", e),
-                    _ => {}
+                if let Ok(Some(pre)) = authority.lookup_pre(&name, &query_type).await {
+                    return Ok(pre);
                 }
 
                 let first = name[0].to_string();
@@ -203,7 +218,7 @@ impl AuthorityObject for DatabaseAuthority {
                 // todo: improve error handling
                 let txt = match DomainFacade::find_by_id(&authority.pool, &first).await {
                     Ok(Some(Domain { txt: Some(txt), .. })) => txt,
-                    Ok(None) => return Err(error(anyhow!("{} not found", first))),
+                    Ok(None) => return Err(error(anyhow!("Not found"))),
                     Err(e) => return Err(error(e)),
                     _ => return Ok(LookupRecords::Empty),
                 };
@@ -217,7 +232,9 @@ impl AuthorityObject for DatabaseAuthority {
                     record_set,
                 ))
             }
-            .map_ok(|res| Box::new(res) as Box<dyn LookupObject>),
+            .map_ok(|res| Box::new(res) as Box<dyn LookupObject>)
+            .inspect_err(|err| error!("{}", err))
+            .instrument(span),
         )
     }
 

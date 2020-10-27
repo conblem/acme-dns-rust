@@ -6,13 +6,13 @@ use sqlx::PgPool;
 use std::env;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
+use tracing_futures::Instrument;
 
 use crate::acme::DatabasePersist;
 use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::{DatabaseAuthority, DNS};
-use tracing_futures::Instrument;
 
 mod acme;
 mod api;
@@ -32,25 +32,19 @@ fn main() {
     }
 }
 
-#[tracing::instrument]
+#[tracing::instrument(err)]
 fn run() -> Result<()> {
     let config_path = env::args().nth(1);
     let config = config::load_config(config_path)?;
 
-    let runtime = match Runtime::new() {
-        Ok(runtime) => runtime,
-        Err(e) => {
-            error!("{}", e);
-            return Err(e.into());
-        }
-    };
+    let runtime = Runtime::new()?;
     debug!("Created runtime");
 
     // Async closure cannot be move, if runtime gets moved into it
     // it gets dropped inside an async call
     let res: Result<()> = runtime.handle().block_on(
         async {
-            let pool = setup_database(&config.general.db).in_current_span().await?;
+            let pool = setup_database(&config.general.db).await?;
             let authority =
                 DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
             let dns = DNS::new(&config.general.dns, &runtime, authority);
@@ -58,6 +52,7 @@ fn run() -> Result<()> {
             let api = Api::new(
                 config.api.http.as_deref(),
                 config.api.https.as_deref(),
+                config.api.prom.as_deref(),
                 pool.clone(),
             )
             .and_then(Api::spawn);
@@ -74,36 +69,21 @@ fn run() -> Result<()> {
         .in_current_span(),
     );
 
-    if let Err(e) = res {
-        error!("{}", e);
-        return Err(e.into());
-    };
+    res?;
 
     Ok(())
 }
 
 #[tracing::instrument(skip(db))]
 async fn setup_database(db: &str) -> Result<PgPool, sqlx::Error> {
-    let pool = async {
-        let options = PgConnectOptions::from_str(db)?;
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect_with(options)
-            .await?;
-        debug!("Created DB pool");
+    let options = PgConnectOptions::from_str(db)?;
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await?;
+    debug!("Created DB pool");
 
-        MIGRATOR.run(&pool).await?;
-        info!("Ran migration");
-        Ok(pool)
-    }
-    .in_current_span()
-    .await;
-
-    match pool {
-        Ok(pool) => Ok(pool),
-        Err(e) => {
-            error!("{}", e);
-            Err(e)
-        }
-    }
+    MIGRATOR.run(&pool).await?;
+    info!("Ran migration");
+    Ok(pool)
 }

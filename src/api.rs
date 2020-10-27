@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Error, Result};
 use futures_util::future::OptionFuture;
-use futures_util::stream::{repeat, TryStream};
+use futures_util::stream::{repeat, Stream};
 use futures_util::FutureExt;
 use futures_util::{StreamExt, TryStreamExt};
 use parking_lot::RwLock;
+use prometheus::proto::MetricFamily;
+use prometheus::{Encoder, TextEncoder};
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
@@ -11,12 +13,13 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
-use tracing::{error, info};
+use tracing::{debug_span, error, info};
 use tracing_futures::Instrument;
-use warp::{http::Response, reply, serve, Filter, Rejection, Reply};
+use warp::{http::Response, serve, Filter, Rejection, Reply};
 
 use crate::cert::{Cert, CertFacade};
 use crate::domain::{Domain, DomainFacade};
+use crate::util::to_u64;
 
 struct Acceptor {
     pool: PgPool,
@@ -56,12 +59,16 @@ impl Acceptor {
     }
 
     async fn load_cert(&self) -> Result<TlsAcceptor> {
-        let new_cert = CertFacade::first_cert(&self.pool).await;
+        let new_cert = CertFacade::first_cert(&self.pool).in_current_span().await;
 
         let db_cert = match (new_cert, &*self.config.read()) {
             (Ok(Some(new_cert)), (cert, _)) if Some(&new_cert) != cert.as_ref() => new_cert,
-            (_, (_, server_config)) => return Ok(TlsAcceptor::from(Arc::clone(server_config))),
+            (_, (_, server_config)) => {
+                info!("Using existing TLS Config");
+                return Ok(TlsAcceptor::from(Arc::clone(server_config)));
+            }
         };
+        info!(timestamp = to_u64(&db_cert.update), "Found new cert");
 
         let server_config = match Acceptor::create_server_config(&db_cert) {
             Ok(server_config) => server_config,
@@ -73,6 +80,7 @@ impl Acceptor {
         };
 
         *self.config.write() = (Some(db_cert), Arc::clone(&server_config));
+        info!("Created new TLS config");
         Ok(TlsAcceptor::from(server_config))
     }
 }
@@ -80,7 +88,7 @@ impl Acceptor {
 fn stream(
     listener: TcpListener,
     pool: PgPool,
-) -> impl TryStream<Ok = impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error = Error> + Send
+) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
 {
     let acceptor = Acceptor::new(pool);
 
@@ -88,33 +96,34 @@ fn stream(
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
         .err_into()
-        .map_ok(|(conn, acceptor)| async move {
-            let tls = acceptor.load_cert().await?;
-            Ok(tls.accept(conn).await?)
+        .map_ok(|(conn, acceptor)| {
+            let addr = conn.peer_addr();
+            async move {
+                let tls = acceptor.load_cert().in_current_span().await?;
+                Ok(tls.accept(conn).in_current_span().await?)
+            }
+            .instrument(debug_span!("TLS", remote.addr = ?addr))
         })
         .try_buffer_unordered(100)
         .inspect_err(|err| error!("Stream error: {:?}", err))
         .filter(|stream| futures_util::future::ready(stream.is_ok()))
+        .into_stream()
 }
 
 pub struct Api {
     http: Option<TcpListener>,
     https: Option<TcpListener>,
+    prom: Option<TcpListener>,
     pool: PgPool,
 }
 
-#[tracing::instrument(skip(pool))]
-async fn register(pool: PgPool, domain: Domain) -> Result<reply::Response, Rejection> {
-    let _domain = match DomainFacade::create_domain(&pool, &domain)
-        .in_current_span()
-        .await
-    {
+async fn register(pool: PgPool, domain: Domain) -> Result<impl Reply, Rejection> {
+    let _domain = match DomainFacade::create_domain(&pool, &domain).await {
         Err(e) => {
             error!("{}", e);
             return Ok(Response::builder()
                 .status(500)
                 .body(e.to_string())
-                .unwrap()
                 .into_response());
         }
         Ok(domain) => domain,
@@ -124,36 +133,67 @@ async fn register(pool: PgPool, domain: Domain) -> Result<reply::Response, Rejec
     Ok(Response::new("no error").into_response())
 }
 
+fn prom() -> impl Reply {
+    let encoder = TextEncoder::new();
+    let family = MetricFamily::new();
+    let mut res = vec![];
+    if let Err(e) = encoder.encode(&[family], &mut res) {
+        error!("{}", e);
+        return Response::builder()
+            .status(500)
+            .body(e.to_string())
+            .into_response();
+    }
+
+    Response::builder()
+        .header("Content-Type", "text/plain")
+        .body(res)
+        .into_response()
+}
+
 impl Api {
     pub async fn new<A: ToSocketAddrs>(
         http: Option<A>,
         https: Option<A>,
+        prom: Option<A>,
         pool: PgPool,
     ) -> Result<Self> {
         let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
         let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
+        let prom = OptionFuture::from(prom.map(TcpListener::bind)).map(Option::transpose);
 
-        let (http, https) = tokio::try_join!(http, https)?;
+        let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
-        Ok(Api { http, https, pool })
+        Ok(Api {
+            http,
+            https,
+            prom,
+            pool,
+        })
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(name = "Api::spawn", skip(self))]
     pub async fn spawn(self) -> Result<()> {
         info!("Starting API spawn");
+        let metrics = warp::path("metrics")
+            .and(warp::get())
+            .map(prom)
+            .with(warp::trace::request());
 
         let pool = self.pool.clone();
         let routes = warp::path("register")
             .and(warp::post())
             .map(move || pool.clone())
             .and(warp::body::json())
-            .and_then(register);
+            .and_then(register)
+            .with(warp::trace::request());
 
         let http = self
             .http
             .map(|http| {
-                info!(?http, "Starting http");
-                http.in_current_span()
+                //info!(?http, "Starting http");
+                let addr = http.local_addr();
+                http.instrument(debug_span!("HTTP", local.addr = ?addr))
             })
             .map(|http| serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
@@ -162,17 +202,36 @@ impl Api {
         let https = self
             .https
             .map(|https| {
-                info!(?https, "Starting https");
-                stream(https, pool).into_stream().in_current_span()
+                //info!(?https, "Starting https");
+                let addr = https.local_addr();
+                stream(https, pool).instrument(debug_span!("HTTPS", local.addr = ?addr))
             })
             .map(|https| serve(routes).serve_incoming(https))
             .map(tokio::spawn);
 
-        match (https, http) {
-            (Some(https), Some(http)) => tokio::try_join!(https, http).map(|_| ()),
-            (Some(https), None) => https.await,
-            (None, Some(http)) => http.await,
-            _ => Ok(()),
+        let prom = self
+            .prom
+            .map(|prom| {
+                //info!(?http, "Starting http");
+                let addr = prom.local_addr();
+                prom.instrument(debug_span!("PROM", local.addr = ?addr))
+            })
+            .map(|prom| serve(metrics).serve_incoming(prom))
+            .map(tokio::spawn);
+
+        match (https, http, prom) {
+            (Some(https), Some(http), Some(prom)) => {
+                tokio::try_join!(https, http, prom).map(|_| ())
+            }
+            (None, None, None) => Ok(()),
+
+            (Some(https), Some(http), None) => tokio::try_join!(https, http).map(|_| ()),
+            (Some(https), None, Some(prom)) => tokio::try_join!(https, prom).map(|_| ()),
+            (None, Some(http), Some(prom)) => tokio::try_join!(http, prom).map(|_| ()),
+
+            (Some(https), None, None) => https.await,
+            (None, Some(http), None) => http.await,
+            (None, None, Some(prom)) => prom.await,
         }?;
 
         Ok(())

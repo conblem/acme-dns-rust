@@ -9,6 +9,7 @@ use tracing::{debug, info, info_span};
 pub struct Api {
     pub http: Option<String>,
     pub https: Option<String>,
+    pub prom: Option<String>,
 }
 
 fn default_acme() -> String {

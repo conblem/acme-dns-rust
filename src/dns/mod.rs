@@ -1,40 +1,57 @@
 use anyhow::Result;
+use std::future::Future;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tokio::runtime::Runtime;
+use tracing::field::{debug, Empty};
+use tracing::{info_span, Span};
+use tracing_futures::Instrument;
 use trust_dns_server::authority::{AuthorityObject, Catalog};
+use trust_dns_server::proto::rr::Name;
 use trust_dns_server::ServerFuture;
 
 mod authority;
+mod handler;
 mod parse;
 
 pub use self::authority::DatabaseAuthority;
+use crate::dns::handler::TraceRequestHandler;
 
 pub struct DNS<'a, A> {
-    server: ServerFuture<Catalog>,
+    server: ServerFuture<TraceRequestHandler>,
     addr: A,
     runtime: &'a Runtime,
+    span: Span,
 }
 
-impl<'a, A: ToSocketAddrs> DNS<'a, A> {
+impl<'a, A: 'a + ToSocketAddrs> DNS<'a, A> {
     pub fn new(addr: A, runtime: &'a Runtime, authority: Box<dyn AuthorityObject>) -> Self {
-        let mut catalog = Catalog::new();
-        catalog.upsert(authority.origin().clone(), authority);
+        let span = info_span!("DNS::spawn", local.addr = Empty);
 
-        let server = ServerFuture::new(catalog);
+        let mut catalog = Catalog::new();
+        catalog.upsert(Name::root().into(), authority);
+        let request_handler = TraceRequestHandler::new(catalog, span.clone());
+
+        let server = ServerFuture::new(request_handler);
 
         DNS {
             server,
             addr,
             runtime,
+            span,
         }
     }
 
-    pub async fn spawn(mut self) -> Result<()> {
-        let udp = UdpSocket::bind(self.addr).await?;
-        self.server.register_socket(udp, self.runtime);
+    pub fn spawn(mut self) -> impl 'a + Future<Output = Result<()>> {
+        let span = self.span.clone();
+        async move {
+            let udp = UdpSocket::bind(self.addr).await?;
+            self.span.record("local.addr", &debug(udp.local_addr()));
+            self.server.register_socket(udp, self.runtime);
 
-        tokio::spawn(self.server.block_until_done()).await??;
+            tokio::spawn(self.server.block_until_done()).await??;
 
-        Ok(())
+            Ok(())
+        }
+        .instrument(span)
     }
 }
