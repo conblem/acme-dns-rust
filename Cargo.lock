@@ -8,6 +8,7 @@ dependencies = [
  "anyhow",
  "bcrypt",
  "futures-util",
+ "lazy_static",
  "parking_lot",
  "prometheus",
  "rustls 0.18.1",
