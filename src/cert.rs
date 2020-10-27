@@ -3,8 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::time::Duration;
 use tokio::time::Interval;
-use tracing::{error, info, Span};
-use tracing_futures::Instrument;
+use tracing::{error, info, Instrument, Span};
 use uuid::Uuid;
 
 use crate::acme::DatabasePersist;

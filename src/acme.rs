@@ -3,9 +3,9 @@ use sqlx::Row;
 use sqlx::{Pool, Postgres};
 use tokio::runtime::Handle;
 use tokio::stream::StreamExt;
+use tracing::Instrument;
 
 use crate::util::{error, to_i64};
-use tracing_futures::Instrument;
 
 #[derive(Clone)]
 pub struct DatabasePersist {

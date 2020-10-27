@@ -6,8 +6,7 @@ use std::net::IpAddr::V4;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
-use tracing::{debug, error, info, Span};
-use tracing_futures::Instrument;
+use tracing::{debug, error, info, Instrument, Span};
 use trust_dns_client::op::LowerQuery;
 use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{

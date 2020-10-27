@@ -1,6 +1,6 @@
 use tracing::field::Empty;
-use tracing::{info_span, Span};
-use tracing_futures::{Instrument, Instrumented};
+use tracing::instrument::Instrumented;
+use tracing::{info_span, Instrument, Span};
 use trust_dns_server::authority::Catalog;
 use trust_dns_server::server::Request;
 use trust_dns_server::server::{RequestHandler, ResponseHandler};

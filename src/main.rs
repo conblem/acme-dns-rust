@@ -6,8 +6,7 @@ use sqlx::PgPool;
 use std::env;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
-use tracing::{debug, info};
-use tracing_futures::Instrument;
+use tracing::{debug, info, Instrument};
 
 use crate::acme::DatabasePersist;
 use crate::api::Api;
