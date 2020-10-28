@@ -1,4 +1,4 @@
-use futures_util::future::{Map, Join, Ready};
+use futures_util::future::{Join, Map, Ready};
 use futures_util::FutureExt;
 use lazy_static::lazy_static;
 use prometheus::{register_histogram_vec, HistogramTimer, HistogramVec};

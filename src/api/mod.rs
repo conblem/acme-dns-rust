@@ -69,8 +69,7 @@ impl Api {
             .map(move || pool.clone())
             .and(warp::body::json())
             .and_then(register)
-            .with(warp::trace::request())
-            .with(warp::wrap_fn(metrics_wrapper));
+            .with(warp::wrap_fn(metrics_wrapper(None)));
 
         let http = self
             .http
