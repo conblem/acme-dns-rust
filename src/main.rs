@@ -44,6 +44,8 @@ fn run() -> Result<()> {
     // it gets dropped inside an async call
     let res: Result<()> = runtime.handle().block_on(
         async {
+            debug!("Running in runtime");
+
             let pool = setup_database(&config.general.db).await?;
             let authority =
                 DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
@@ -76,6 +78,7 @@ fn run() -> Result<()> {
 
 #[tracing::instrument(skip(db))]
 async fn setup_database(db: &str) -> Result<PgPool, sqlx::Error> {
+    debug!("Starting DB Setup");
     let options = PgConnectOptions::from_str(db)?;
     let pool = PgPoolOptions::new()
         .max_connections(5)
