@@ -11,7 +11,8 @@ use warp::path::FullPath;
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
-//todo: dont use int maybe
+use self::MetricsConfig::{Borrowed, Owned};
+
 lazy_static! {
     static ref HTTP_STATUS_COUNTER: IntCounterVec = register_int_counter_vec!(
         "http_status_counter",
@@ -25,6 +26,27 @@ lazy_static! {
         &["path", "method"]
     )
     .unwrap();
+}
+
+enum MetricsConfig {
+    Borrowed(&'static str),
+    Owned(FullPath),
+}
+
+impl MetricsConfig {
+    fn new(config: &'static str, path: FullPath) -> MetricsConfig {
+        match config {
+            "" => Owned(path),
+            config => Borrowed(config),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        match &self {
+            Borrowed(config) => config,
+            Owned(path) => path.as_str(),
+        }
+    }
 }
 
 pub(super) trait MetricFn<R, I>: Fn(I) -> <Self as MetricFn<R, I>>::Output
@@ -49,9 +71,25 @@ where
     type Output = O;
 }
 
+fn stop_metrics(
+    config: MetricsConfig,
+    method: Method,
+    timer: HistogramTimer,
+    res: impl Reply,
+) -> WarpResponse {
+    let res = res.into_response();
+    HTTP_STATUS_COUNTER
+        .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
+        .inc();
+
+    timer.observe_duration();
+
+    res
+}
+
 pub(super) fn metrics_wrapper<R, I>(config: impl Into<Option<&'static str>>) -> impl MetricFn<R, I>
 where
-    R: Reply,
+    R: Reply + 'static,
     I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
 {
     let config = config.into().unwrap_or("");
@@ -60,30 +98,16 @@ where
         warp::filters::path::full()
             .and(warp::filters::method::method())
             .map(move |path: FullPath, method: Method| {
-                let path = match config {
-                    "" => path.as_str().to_string(),
-                    config => config.to_string(),
-                };
+                let config = MetricsConfig::new(config, path);
                 let timer = HTTP_REQ_HISTOGRAM
-                    .with_label_values(&[&path, method.as_str()])
+                    .with_label_values(&[config.as_str(), method.as_str()])
                     .start_timer();
 
-                (path, method, timer)
+                (config, method, timer)
             })
             .untuple_one()
             .and(filter)
-            .map(
-                |path: String, method: Method, timer: HistogramTimer, res: R| {
-                    let res = res.into_response();
-                    HTTP_STATUS_COUNTER
-                        .with_label_values(&[&path, method.as_str(), res.status().as_str()])
-                        .inc();
-
-                    timer.observe_duration();
-
-                    res
-                },
-            )
+            .map(stop_metrics)
             .with(trace::request())
             .map(Reply::into_response)
     }
