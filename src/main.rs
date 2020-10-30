@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use std::env;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
-use tracing::{debug, info, Instrument};
+use tracing::{debug, error, info, Instrument};
 
 use crate::acme::DatabasePersist;
 use crate::api::Api;
@@ -26,7 +26,8 @@ static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 fn main() {
     tracing_subscriber::fmt::init();
 
-    if run().is_err() {
+    if let Err(e) = run() {
+        error!("{}", e);
         std::process::exit(1);
     }
 }
