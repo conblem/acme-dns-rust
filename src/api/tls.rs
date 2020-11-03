@@ -93,8 +93,8 @@ pub(super) fn stream(
         .map_ok(|(conn, acceptor)| {
             let addr = conn.peer_addr();
             async move {
-                let tls = acceptor.load_cert().in_current_span().await?;
-                Ok(tls.accept(conn).in_current_span().await?)
+                let tls = acceptor.load_cert().await?;
+                Ok(tls.accept(conn).await?)
             }
             .instrument(debug_span!("TLS", remote.addr = ?addr))
         })
