@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use futures_util::stream::{repeat, Stream};
-use futures_util::StreamExt;
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
@@ -94,7 +93,7 @@ pub(super) fn stream(
             let addr = conn.peer_addr();
             async move {
                 let tls = acceptor.load_cert().await?;
-                Ok(tls.accept(conn).await?)
+                tls.accept(conn).err_into().await
             }
             .instrument(debug_span!("TLS", remote.addr = ?addr))
         })

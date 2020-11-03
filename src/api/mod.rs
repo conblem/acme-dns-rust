@@ -38,6 +38,10 @@ async fn register(pool: PgPool, domain: Domain) -> Result<impl Reply, Rejection>
     Ok(Response::new("no error").into_response())
 }
 
+fn noop<T>(_: T) {
+    ()
+}
+
 impl Api {
     pub async fn new<A: ToSocketAddrs>(
         http: Option<A>,
@@ -74,7 +78,6 @@ impl Api {
         let http = self
             .http
             .map(|http| {
-                //info!(?http, "Starting http");
                 let addr = http.local_addr();
                 http.instrument(debug_span!("HTTP", local.addr = ?addr))
             })
@@ -85,7 +88,6 @@ impl Api {
         let https = self
             .https
             .map(|https| {
-                //info!(?https, "Starting https");
                 let addr = https.local_addr();
                 tls::stream(https, pool).instrument(debug_span!("HTTPS", local.addr = ?addr))
             })
@@ -95,7 +97,6 @@ impl Api {
         let prom = self
             .prom
             .map(|prom| {
-                //info!(?http, "Starting http");
                 let addr = prom.local_addr();
                 prom.instrument(debug_span!("PROM", local.addr = ?addr))
             })
@@ -103,14 +104,12 @@ impl Api {
             .map(tokio::spawn);
 
         match (https, http, prom) {
-            (Some(https), Some(http), Some(prom)) => {
-                tokio::try_join!(https, http, prom).map(|_| ())
-            }
+            (Some(https), Some(http), Some(prom)) => tokio::try_join!(https, http, prom).map(noop),
             (None, None, None) => Ok(()),
 
-            (Some(https), Some(http), None) => tokio::try_join!(https, http).map(|_| ()),
-            (Some(https), None, Some(prom)) => tokio::try_join!(https, prom).map(|_| ()),
-            (None, Some(http), Some(prom)) => tokio::try_join!(http, prom).map(|_| ()),
+            (Some(https), Some(http), None) => tokio::try_join!(https, http).map(noop),
+            (Some(https), None, Some(prom)) => tokio::try_join!(https, prom).map(noop),
+            (None, Some(http), Some(prom)) => tokio::try_join!(http, prom).map(noop),
 
             (Some(https), None, None) => https.await,
             (None, Some(http), None) => http.await,
