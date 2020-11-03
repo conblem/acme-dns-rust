@@ -84,7 +84,7 @@ async fn setup_database(db: &str) -> Result<PgPool, sqlx::Error> {
         .max_connections(5)
         .connect_with(options)
         .await?;
-    debug!("Created DB pool");
+    debug!(?pool, "Created DB pool");
 
     MIGRATOR.run(&pool).await?;
     info!("Ran migration");
