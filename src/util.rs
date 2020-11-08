@@ -1,5 +1,6 @@
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 pub(crate) const fn to_i64(val: &u64) -> i64 {
     i64::from_ne_bytes(val.to_ne_bytes())
@@ -24,6 +25,10 @@ pub(crate) fn error<E: From<io::Error>>(err: impl Into<anyhow::Error>) -> E {
     };
 
     E::from(err)
+}
+
+pub(crate) fn uuid() -> String {
+    Uuid::new_v4().to_simple().to_string()
 }
 
 #[cfg(test)]

@@ -1,6 +1,26 @@
+use anyhow::{Error, Result};
+use core::convert::TryFrom;
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Postgres};
-use uuid::Uuid;
+
+use crate::util::uuid;
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DomainDTO {
+    pub id: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for DomainDTO {
+    fn default() -> Self {
+        DomainDTO {
+            id: uuid(),
+            username: uuid(),
+            password: uuid(),
+        }
+    }
+}
 
 #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
 pub struct Domain {
@@ -10,18 +30,30 @@ pub struct Domain {
     pub txt: Option<String>,
 }
 
-impl Default for Domain {
-    fn default() -> Self {
-        Domain {
-            id: Uuid::new_v4().to_simple().to_string(),
-            username: Uuid::new_v4().to_simple().to_string(),
-            password: bcrypt::hash(
-                uuid::Uuid::new_v4().to_simple().to_string(),
-                bcrypt::DEFAULT_COST,
-            )
-            .unwrap(),
+impl TryFrom<DomainDTO> for Domain {
+    type Error = Error;
+    fn try_from(input: DomainDTO) -> Result<Self, Self::Error> {
+        let password = bcrypt::hash(input.password, bcrypt::DEFAULT_COST)?;
+
+        Ok(Domain {
+            id: input.id,
+            username: input.username,
+            password,
             txt: None,
-        }
+        })
+    }
+}
+
+impl Domain {
+    pub(crate) fn new() -> Result<Self> {
+        let password = bcrypt::hash(uuid(), bcrypt::DEFAULT_COST)?;
+
+        Ok(Domain {
+            id: uuid(),
+            username: uuid(),
+            password,
+            txt: None,
+        })
     }
 }
 

@@ -9,6 +9,10 @@ categories = ["command-line-utilities"]
 repository = "https://github.com/conblem/acme-dns-rust/"
 description = "Acme DNS implementation written in Rust"
 
+[[bin]]
+name = "acme-dns-rust"
+path = "src/main.rs"
+
 [dependencies]
 lazy_static = "1.4"
 prometheus = "0.10"
@@ -31,6 +35,7 @@ rustls = "0.18"
 tokio-rustls = "0.14"
 toml = "0.5"
 anyhow = "1.0"
+bytes = "0.5"
 
 [features]
 default = ["postgres"]

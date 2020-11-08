@@ -1,16 +1,17 @@
 use anyhow::{anyhow, Error, Result};
 use futures_util::stream::{repeat, Stream};
-use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::{StreamExt, TryStreamExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
+use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument};
 
+use super::proxy::PeerAddr;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
 
@@ -52,7 +53,7 @@ impl Acceptor {
     }
 
     async fn load_cert(&self) -> Result<TlsAcceptor> {
-        let new_cert = CertFacade::first_cert(&self.pool).in_current_span().await;
+        let new_cert = CertFacade::first_cert(&self.pool).await;
 
         let db_cert = match (new_cert, &*self.config.read()) {
             (Ok(Some(new_cert)), (cert, _)) if Some(&new_cert) != cert.as_ref() => new_cert,
@@ -78,10 +79,15 @@ impl Acceptor {
     }
 }
 
-pub(super) fn stream(
-    listener: TcpListener,
+pub(super) fn stream<S, O, E, P>(
+    listener: S,
     pool: PgPool,
 ) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
+where
+    P: std::error::Error + Send + Sync,
+    S: Stream<Item = Result<O, E>> + Send,
+    O: AsyncRead + AsyncWrite + Send + Unpin + PeerAddr<P> + 'static,
+    E: Into<Error> + Send,
 {
     let acceptor = Acceptor::new(pool);
 
@@ -89,13 +95,20 @@ pub(super) fn stream(
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
         .err_into()
-        .map_ok(|(conn, acceptor)| {
-            let addr = conn.peer_addr();
-            async move {
-                let tls = acceptor.load_cert().await?;
-                tls.accept(conn).err_into().await
+        .map_ok(|(mut conn, acceptor)| async move {
+            let span = debug_span!("TLS", remote.addr = Empty);
+            let addr = conn.proxy_peer().instrument(span.clone());
+            match addr.await {
+                Ok(addr) => {
+                    span.record("remote.addr", &display(addr));
+                }
+                Err(e) => {
+                    span.record("remote.addr", &display("Unknown"));
+                    span.in_scope(|| error!("Could net get remote.addr: {}", e));
+                }
             }
-            .instrument(debug_span!("TLS", remote.addr = ?addr))
+            let tls = acceptor.load_cert().instrument(span.clone()).await?;
+            Ok(tls.accept(conn).instrument(span).await?)
         })
         .try_buffer_unordered(100)
         .inspect_err(|err| error!("Stream error: {:?}", err))

@@ -1,45 +1,23 @@
 use anyhow::Result;
 use futures_util::future::OptionFuture;
 use futures_util::FutureExt;
+use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
-use tracing::{debug_span, error, info};
+use tracing::{debug_span, info};
 use tracing_futures::Instrument;
-use warp::{http::Response, serve, Filter, Rejection, Reply};
-
-use crate::domain::{Domain, DomainFacade};
 
 mod metrics;
+mod proxy;
+mod routes;
 mod tls;
-
-use metrics::{metrics, metrics_wrapper};
 
 pub struct Api {
     http: Option<TcpListener>,
     https: Option<TcpListener>,
     prom: Option<TcpListener>,
     pool: PgPool,
-}
-
-async fn register(pool: PgPool, domain: Domain) -> Result<impl Reply, Rejection> {
-    let _domain = match DomainFacade::create_domain(&pool, &domain).await {
-        Err(e) => {
-            error!("{}", e);
-            return Ok(Response::builder()
-                .status(500)
-                .body(e.to_string())
-                .into_response());
-        }
-        Ok(domain) => domain,
-    };
-
-    info!("Success for call");
-    Ok(Response::new("no error").into_response())
-}
-
-fn noop<T>(_: T) {
-    ()
 }
 
 impl Api {
@@ -67,13 +45,7 @@ impl Api {
     pub async fn spawn(self) -> Result<()> {
         info!("Starting API spawn");
 
-        let pool = self.pool.clone();
-        let routes = warp::path("register")
-            .and(warp::post())
-            .map(move || pool.clone())
-            .and(warp::body::json())
-            .and_then(register)
-            .with(warp::wrap_fn(metrics_wrapper(None)));
+        let routes = routes::routes(self.pool.clone());
 
         let http = self
             .http
@@ -81,7 +53,7 @@ impl Api {
                 let addr = http.local_addr();
                 http.instrument(debug_span!("HTTP", local.addr = ?addr))
             })
-            .map(|http| serve(routes.clone()).serve_incoming(http))
+            .map(|http| warp::serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
         let pool = self.pool.clone();
@@ -91,7 +63,7 @@ impl Api {
                 let addr = https.local_addr();
                 tls::stream(https, pool).instrument(debug_span!("HTTPS", local.addr = ?addr))
             })
-            .map(|https| serve(routes).serve_incoming(https))
+            .map(|https| warp::serve(routes).serve_incoming(https))
             .map(tokio::spawn);
 
         let prom = self
@@ -100,7 +72,7 @@ impl Api {
                 let addr = prom.local_addr();
                 prom.instrument(debug_span!("PROM", local.addr = ?addr))
             })
-            .map(|prom| serve(metrics()).serve_incoming(prom))
+            .map(|prom| warp::serve(metrics()).serve_incoming(prom))
             .map(tokio::spawn);
 
         match (https, http, prom) {
@@ -118,4 +90,8 @@ impl Api {
 
         Ok(())
     }
+}
+
+fn noop<T>(_: T) {
+    ()
 }

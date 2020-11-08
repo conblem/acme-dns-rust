@@ -118,7 +118,7 @@ impl CertFacade {
                 }
             }
             None => {
-                let domain = Domain::default();
+                let domain = Domain::new()?;
                 let cert = Cert::new(&domain);
 
                 DomainFacade::create_domain(&mut transaction, &domain).await?;

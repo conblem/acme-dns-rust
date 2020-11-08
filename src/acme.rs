@@ -41,7 +41,8 @@ impl Persist for DatabasePersist {
                 .bind(to_i64(realm))
                 .bind(persist_kind(kind))
                 .bind(value)
-                .execute(&self.pool);
+                .execute(&self.pool)
+                .in_current_span();
 
         self.handle.block_on(query).map(|_| ()).map_err(error)
     }

@@ -6,7 +6,7 @@ use prometheus::{
 use tracing::error;
 use warp::filters::trace;
 use warp::http::header::{HeaderValue, CONTENT_TYPE};
-use warp::http::{Method, Response};
+use warp::http::{Method, Response, StatusCode};
 use warp::path::FullPath;
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
@@ -87,10 +87,11 @@ fn stop_metrics(
     res
 }
 
-pub(super) fn metrics_wrapper<R, I>(config: impl Into<Option<&'static str>>) -> impl MetricFn<R, I>
+pub(super) fn metrics_wrapper<R, I, C>(config: C) -> impl MetricFn<R, I>
 where
     R: Reply + 'static,
     I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
+    C: Into<Option<&'static str>>,
 {
     let config = config.into().unwrap_or("");
 
@@ -113,28 +114,32 @@ where
     }
 }
 
-fn request() -> impl Reply {
+const TEXT_PLAIN_MIME: &'static str = "text/plain";
+
+fn metrics_handler() -> impl Reply {
     let encoder = TextEncoder::new();
     let families = prometheus::gather();
     let mut res = vec![];
     if let Err(e) = encoder.encode(&families, &mut res) {
         error!("{}", e);
         return Response::builder()
-            .status(500)
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(e.to_string())
             .into_response();
     }
 
     Response::builder()
-        .header(CONTENT_TYPE, HeaderValue::from_static("text/plain"))
+        .header(CONTENT_TYPE, HeaderValue::from_static(TEXT_PLAIN_MIME))
         .body(res)
         .into_response()
 }
 
+const METRICS_PATH: &'static str = "metrics";
+
 pub(super) fn metrics(
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {
-    warp::path("metrics")
+    warp::path(METRICS_PATH)
         .and(warp::get())
-        .map(request)
+        .map(metrics_handler)
         .with(warp::wrap_fn(metrics_wrapper(None)))
 }

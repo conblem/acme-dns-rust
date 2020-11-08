@@ -7,6 +7,7 @@ dependencies = [
  "acme-lib",
  "anyhow",
  "bcrypt",
+ "bytes",
  "futures-util",
  "lazy_static",
  "parking_lot",
