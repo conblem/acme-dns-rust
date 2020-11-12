@@ -6,7 +6,6 @@ use prometheus::{
     IntCounterVec, TextEncoder,
 };
 use std::io::{BufRead, Cursor};
-use std::ops::{Deref, DerefMut};
 use tracing::{debug, error};
 use warp::filters::trace;
 use warp::http::header::{HeaderValue, CONTENT_TYPE};
@@ -179,16 +178,8 @@ impl Drop for HistogramTimerWrapper {
     }
 }
 
-impl Deref for HistogramTimerWrapper {
-    type Target = Option<HistogramTimer>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for HistogramTimerWrapper {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl HistogramTimerWrapper {
+    fn take(&mut self) -> Option<HistogramTimer> {
+        self.0.take()
     }
 }
