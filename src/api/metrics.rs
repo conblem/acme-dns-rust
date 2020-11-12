@@ -1,9 +1,13 @@
+use futures_util::stream;
+use hyper::Body;
 use lazy_static::lazy_static;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
     IntCounterVec, TextEncoder,
 };
-use tracing::error;
+use std::io::{BufRead, Cursor};
+use std::ops::{Deref, DerefMut};
+use tracing::{debug, error};
 use warp::filters::trace;
 use warp::http::header::{HeaderValue, CONTENT_TYPE};
 use warp::http::{Method, Response, StatusCode};
@@ -74,15 +78,19 @@ where
 fn stop_metrics(
     config: MetricsConfig,
     method: Method,
-    timer: HistogramTimer,
+    mut timer: HistogramTimerWrapper,
     res: impl Reply,
 ) -> WarpResponse {
     let res = res.into_response();
+
     HTTP_STATUS_COUNTER
         .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
         .inc();
 
-    timer.observe_duration();
+    if let Some(timer) = timer.take() {
+        let time = timer.stop_and_record() * 1000f64;
+        debug!("request took {}ms", time);
+    }
 
     res
 }
@@ -102,7 +110,8 @@ where
                 let config = MetricsConfig::new(config, path);
                 let timer = HTTP_REQ_HISTOGRAM
                     .with_label_values(&[config.as_str(), method.as_str()])
-                    .start_timer();
+                    .start_timer()
+                    .into();
 
                 (config, method, timer)
             })
@@ -116,6 +125,7 @@ where
 
 const TEXT_PLAIN_MIME: &'static str = "text/plain";
 
+// maybe this implementation is wrong as it removes bucket items aswell
 fn metrics_handler() -> impl Reply {
     let encoder = TextEncoder::new();
     let families = prometheus::gather();
@@ -128,9 +138,16 @@ fn metrics_handler() -> impl Reply {
             .into_response();
     }
 
+    // we keep the error in the stream so it can later be handled by warp
+    let stream = Cursor::new(res).lines().filter_map(|line| match line {
+        Ok(line) if !line.ends_with(" 0") => Some(Ok(line + "\n")),
+        Err(error) => Some(Err(error)),
+        _ => None,
+    });
+
     Response::builder()
         .header(CONTENT_TYPE, HeaderValue::from_static(TEXT_PLAIN_MIME))
-        .body(res)
+        .body(Body::wrap_stream(stream::iter(stream)))
         .into_response()
 }
 
@@ -142,4 +159,36 @@ pub(super) fn metrics(
         .and(warp::get())
         .map(metrics_handler)
         .with(warp::wrap_fn(metrics_wrapper(None)))
+}
+
+// Changes the default behaviour of HistogramTimer so it doesn't record the value if it is being dropped
+struct HistogramTimerWrapper(Option<HistogramTimer>);
+
+impl From<HistogramTimer> for HistogramTimerWrapper {
+    fn from(input: HistogramTimer) -> Self {
+        HistogramTimerWrapper(Some(input))
+    }
+}
+
+impl Drop for HistogramTimerWrapper {
+    fn drop(&mut self) {
+        if let Some(histogram_timer) = self.take() {
+            let time = histogram_timer.stop_and_discard() * 1000f64;
+            debug!("rejection took {}ms", time);
+        }
+    }
+}
+
+impl Deref for HistogramTimerWrapper {
+    type Target = Option<HistogramTimer>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for HistogramTimerWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }

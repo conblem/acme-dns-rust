@@ -1,5 +1,6 @@
 use bytes::buf::{Buf, BufMut};
 use futures_util::future::{ready, BoxFuture, FutureExt};
+use futures_util::io::Cursor;
 use std::future::Future;
 use std::mem::MaybeUninit;
 use std::net::SocketAddr;
@@ -7,7 +8,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use futures_util::io::Cursor;
 
 pub(super) trait PeerAddr<E: std::error::Error> {
     fn proxy_peer<'a>(&'a mut self) -> BoxFuture<'a, Result<SocketAddr, E>>;
@@ -15,7 +15,7 @@ pub(super) trait PeerAddr<E: std::error::Error> {
 
 struct PeerAddrFuture<'a> {
     stream: Pin<&'a mut TcpStream>,
-    data: Cursor<Vec<u8>>
+    data: Cursor<Vec<u8>>,
 }
 
 impl<'a> PeerAddrFuture<'a> {

@@ -8,8 +8,7 @@ use tracing::instrument::Instrumented;
 use tracing::{info_span, Instrument, Span};
 use trust_dns_client::op::LowerQuery;
 use trust_dns_server::authority::Catalog;
-use trust_dns_server::server::Request;
-use trust_dns_server::server::{RequestHandler, ResponseHandler};
+use trust_dns_server::server::{Request, RequestHandler, ResponseHandler};
 
 lazy_static! {
     static ref DNS_REQ_HISTOGRAM: HistogramVec = register_histogram_vec!(
@@ -18,13 +17,6 @@ lazy_static! {
         &["name"]
     )
     .unwrap();
-}
-
-fn end_timer(input: (ResponseFutureOutput, HistogramTimer)) {
-    let (res, timer) = input;
-    timer.observe_duration();
-
-    res
 }
 
 type ResponseFuture = <Catalog as RequestHandler>::ResponseFuture;
@@ -82,4 +74,10 @@ impl RequestHandler for TraceRequestHandler {
             .instrument(span)
             .map(end_timer)
     }
+}
+
+fn end_timer((res, timer): (ResponseFutureOutput, HistogramTimer)) {
+    timer.observe_duration();
+
+    res
 }

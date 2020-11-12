@@ -3,6 +3,7 @@ use sqlx::PgPool;
 use std::convert::TryFrom;
 use tracing::error;
 use warp::http::{Response, StatusCode};
+use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
 use super::metrics_wrapper;
@@ -64,5 +65,13 @@ pub(super) fn routes(
         .and_then(update_handler)
         .with(warp::wrap_fn(metrics_wrapper(None)));
 
-    register.or(update)
+    let not_found = warp::any()
+        .map(warp::reply)
+        .and_then(|reply| async move {
+            let res = warp::reply::with_status(reply, StatusCode::NOT_FOUND).into_response();
+            Ok(res) as Result<WarpResponse, Rejection>
+        })
+        .with(warp::wrap_fn(metrics_wrapper("404")));
+
+    register.or(update).or(not_found)
 }
