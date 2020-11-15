@@ -36,7 +36,7 @@ rustls = "0.18"
 tokio-rustls = "0.14"
 toml = "0.5"
 anyhow = "1.0"
-bytes = "0.5"
+bytes = "0.6"
 
 [features]
 default = ["postgres"]
