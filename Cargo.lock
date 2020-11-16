@@ -2132,9 +2132,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-client"
-version = "0.19.5"
+version = "0.19.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a35f19e1deb54dba67f6748095ea3659e9e97b8f426ca728898a1cd1cc78e323"
+checksum = "85c4955b0005f14233f0a85cda61c17ebe6ea5dcec4f01611280649017fb227d"
 dependencies = [
  "backtrace",
  "chrono",
@@ -2151,9 +2151,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-proto"
-version = "0.19.5"
+version = "0.19.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdd7061ba6f4d4d9721afedffbfd403f20f39a4301fee1b70d6fcd09cca69f28"
+checksum = "53861fcb288a166aae4c508ae558ed18b53838db728d4d310aad08270a7d4c2b"
 dependencies = [
  "async-trait",
  "backtrace",
@@ -2172,9 +2172,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-server"
-version = "0.19.5"
+version = "0.19.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "279160939e05885797437d33dd079bf37fb85834fcd1e4d76b47b16f9ec2fe76"
+checksum = "220619d1b14a4e3d825472742e3a484fb99d6d81bb60fdea59b89cc5a16b633a"
 dependencies = [
  "backtrace",
  "bytes",
