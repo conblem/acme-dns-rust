@@ -103,7 +103,7 @@ where
                     span.record("remote.addr", &display(addr));
                 }
                 Err(e) => {
-                    span.record("remote.addr", &display("Unknown"));
+                    span.record("remote.addr", &"Unknown");
                     span.in_scope(|| error!("Could net get remote.addr: {}", e));
                 }
             }

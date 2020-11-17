@@ -1,5 +1,5 @@
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::time::Duration;
 use tokio::time::Interval;
@@ -105,15 +105,16 @@ impl CertFacade {
                 Some(cert)
             }
             Some(mut cert) => {
-                // use constant variables
                 let now = to_i64(&now());
                 let one_hour_ago = now - HOUR as i64;
+                // longer ago than 1 hour so probably timed out
                 if cert.update < one_hour_ago {
                     cert.update = now;
                     cert.state = State::Updating;
                     CertFacade::update_cert(&mut transaction, &cert).await?;
                     Some(cert)
                 } else {
+                    info!("job still in progress");
                     None
                 }
             }
@@ -127,7 +128,7 @@ impl CertFacade {
             }
         };
 
-        transaction.commit().await.unwrap();
+        transaction.commit().await?;
 
         Ok(cert)
     }
@@ -201,15 +202,15 @@ impl CertManager {
 
     async fn test(&self) -> Result<()> {
         // maybe context is not needed here
-        let mut memory_cert = CertFacade::start(&self.pool)
-            .await
-            .context("Start failed")?
-            .ok_or_else(|| anyhow!("Start did not return cert"))?;
+        let mut memory_cert = match CertFacade::start(&self.pool).await? {
+            Some(memory_cert) => memory_cert,
+            None => return Ok(()),
+        };
 
         // todo: improve
         let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await?
-            .expect("must have in sql");
+            .ok_or_else(|| anyhow!("Could not find domain: {}", &memory_cert.domain))?;
 
         let directory = self.directory.clone();
         let mut order = tokio::task::spawn_blocking(move || {
@@ -229,11 +230,29 @@ impl CertManager {
         DomainFacade::update_domain(&self.pool, &domain).await?;
 
         //error handling
+        tokio::task::spawn_blocking(move || call.validate(5000)).await??;
+
+        let mut n = 0;
+        let ord_csr = loop {
+            if n > 10 {
+                return Err(anyhow!("Timed out {:?}", order.api_order()));
+            }
+            let (ord_csr, take) = tokio::task::spawn_blocking(move || match order.refresh() {
+                Err(e) => Err(e),
+                Ok(_) => Ok((order.confirm_validations(), order)),
+            })
+            .await??;
+
+            if let Some(ord_csr) = ord_csr {
+                break ord_csr;
+            }
+
+            order = take;
+            tokio::time::delay_for(Duration::from_secs(1)).await;
+            n += 1;
+        };
+
         let cert = tokio::task::spawn_blocking(move || {
-            call.validate(5000)?;
-            order.refresh()?;
-            // fix
-            let ord_csr = order.confirm_validations().unwrap();
             let private = create_p384_key();
             let ord_crt = ord_csr.finalize_pkey(private, 5000)?;
             ord_crt.download_and_save_cert()
