@@ -20,7 +20,7 @@ prometheus = "0.10"
 tracing = "0.1"
 tracing-subscriber = "0.2"
 tracing-futures = { version = "0.2.4", features = ["futures-03"]}
-sqlx = { version = "0.4.1", default-features = false, features = [ "runtime-tokio", "macros", "migrate"] }
+sqlx = { version = "0.4.1", default-features = false, features = [ "runtime-tokio-rustls", "macros", "migrate"] }
 tokio = { version = "0.2", features = ["dns", "tcp", "udp"] }
 uuid = { version = "0.8", features = ["v4"] }
 simplelog = "0.8"
