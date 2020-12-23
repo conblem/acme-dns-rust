@@ -1,7 +1,9 @@
+use acme_lib::order::NewOrder;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use anyhow::{anyhow, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::time::Duration;
+use tokio::runtime::Handle;
 use tokio::time::Interval;
 use tracing::{error, info, Instrument, Span};
 use uuid::Uuid;
@@ -186,7 +188,7 @@ impl CertManager {
                         info!("Skipping Interval");
                         continue;
                     }
-                    if let Err(e) = self.test().await {
+                    if let Err(e) = self.manage().await {
                         error!("{}", e);
                         continue;
                     }
@@ -200,72 +202,68 @@ impl CertManager {
         Ok(())
     }
 
-    async fn test(&self) -> Result<()> {
+    async fn manage(&self) -> Result<()> {
         // maybe context is not needed here
-        let mut memory_cert = match CertFacade::start(&self.pool).await? {
+        let memory_cert = match CertFacade::start(&self.pool).await? {
             Some(memory_cert) => memory_cert,
             None => return Ok(()),
         };
 
         // todo: improve
-        let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
+        let domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await?
             .ok_or_else(|| anyhow!("Could not find domain: {}", &memory_cert.domain))?;
 
         let directory = self.directory.clone();
-        let mut order = tokio::task::spawn_blocking(move || {
+        let pool = self.pool.clone();
+
+        let cert = tokio::task::spawn_blocking(move || {
             let account = directory.account("acme-dns-rust@byom.de")?;
-            account.new_order("acme.wehrli.ml", &[])
+            let order = account.new_order("acme.wehrli.ml", &[])?;
+            CertManager::validate(memory_cert, domain, order, &pool)
         })
         .await??;
 
-        let mut auths = order.authorizations()?;
-        let call = auths
-            .pop()
-            .ok_or_else(|| anyhow!("couldn't unpack auths"))?
-            .dns_challenge();
-        let proof = call.dns_proof();
+        CertFacade::stop(&self.pool, cert).await?;
 
-        domain.txt = Some(proof);
-        DomainFacade::update_domain(&self.pool, &domain).await?;
+        Ok(())
+    }
 
-        //error handling
-        tokio::task::spawn_blocking(move || call.validate(5000)).await??;
-
-        let mut n = 0;
+    fn validate(
+        mut memory_cert: Cert,
+        mut domain: Domain,
+        mut order: NewOrder<DatabasePersist>,
+        pool: &PgPool,
+    ) -> Result<Cert> {
         let ord_csr = loop {
-            if n > 10 {
-                return Err(anyhow!("Timed out {:?}", order.api_order()));
-            }
-            let (ord_csr, take) = tokio::task::spawn_blocking(move || match order.refresh() {
-                Err(e) => Err(e),
-                Ok(_) => Ok((order.confirm_validations(), order)),
-            })
-            .await??;
-
-            if let Some(ord_csr) = ord_csr {
+            if let Some(ord_csr) = order.confirm_validations() {
                 break ord_csr;
             }
 
-            order = take;
-            tokio::time::delay_for(Duration::from_secs(1)).await;
-            n += 1;
+            let chall = order
+                .authorizations()?
+                .iter()
+                .next()
+                .ok_or_else(|| anyhow!("couldn't unpack auths"))?
+                .dns_challenge();
+
+            domain.txt = Some(chall.dns_proof());
+            let update = DomainFacade::update_domain(pool, &domain);
+            Handle::current().block_on(update)?;
+
+            order.refresh()?;
         };
 
-        let cert = tokio::task::spawn_blocking(move || {
-            let private = create_p384_key();
-            let ord_crt = ord_csr.finalize_pkey(private, 5000)?;
-            ord_crt.download_and_save_cert()
-        })
-        .await??;
+        let private = create_p384_key();
+        let ord_crt = ord_csr.finalize_pkey(private, 5000)?;
+        let cert = ord_crt.download_and_save_cert()?;
 
         let private = cert.private_key().to_string();
         let cert = cert.certificate().to_string();
 
-        memory_cert.cert = Some(cert);
         memory_cert.private = Some(private);
-        CertFacade::stop(&self.pool, memory_cert).await?;
+        memory_cert.cert = Some(cert);
 
-        Ok(())
+        Ok(memory_cert)
     }
 }

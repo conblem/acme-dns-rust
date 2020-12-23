@@ -100,7 +100,11 @@ where
     I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
     C: Into<Option<&'static str>>,
 {
-    let config = config.into().unwrap_or("");
+    let config = match config.into() {
+        Some("") => panic!("Empty str not allowed as param"),
+        Some(config) => config,
+        None => "",
+    };
 
     move |filter: I| {
         warp::filters::path::full()
