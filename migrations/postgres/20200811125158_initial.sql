@@ -44,13 +44,13 @@ create table acme
 (
 	key varchar not null,
 	realm bigint not null,
-	kind char(3) not null,
+	kind varchar not null,
 	value bytea not null
 );
 
-create unique index acme_key_uindex
-	on acme (key);
+--create unique index acme_key_uindex
+	--on acme (key);
 
-alter table acme
-	add constraint acme_pk
-		primary key (key);
+--alter table acme
+	--add constraint acme_pk
+		--primary key (key);

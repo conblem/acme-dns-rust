@@ -184,7 +184,7 @@ impl CertManager {
                 loop {
                     interval.tick().await;
                     info!("Started Interval");
-                    if true {
+                    if false {
                         info!("Skipping Interval");
                         continue;
                     }
@@ -217,9 +217,11 @@ impl CertManager {
         let directory = self.directory.clone();
         let pool = self.pool.clone();
 
+        let span = Span::current();
         let cert = tokio::task::spawn_blocking(move || {
+            let _span = span.enter();
             let account = directory.account("acme-dns-rust@byom.de")?;
-            let order = account.new_order("acme.wehrli.ml", &[])?;
+            let order = account.new_order("acme.conblem.me", &[])?;
             CertManager::validate(memory_cert, domain, order, &pool)
         })
         .await??;
@@ -249,8 +251,9 @@ impl CertManager {
 
             domain.txt = Some(chall.dns_proof());
             let update = DomainFacade::update_domain(pool, &domain);
-            Handle::current().block_on(update)?;
+            Handle::current().block_on(update.in_current_span())?;
 
+            chall.validate(5000)?;
             order.refresh()?;
         };
 
