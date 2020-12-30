@@ -14,7 +14,7 @@ use trust_dns_server::authority::{
     ZoneType,
 };
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
-use trust_dns_server::proto::rr::rdata::TXT;
+use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 
@@ -197,6 +197,11 @@ impl AuthorityObject for DatabaseAuthority {
         span.record("name", &display(&name));
         span.record("query_type", &display(&query_type));
 
+        // not sure if this handling makes sense
+        if query_type == RecordType::SOA {
+            return span.in_scope(|| self.soa());
+        }
+
         BoxedLookupFuture::from(
             async move {
                 info!("Starting lookup");
@@ -235,6 +240,41 @@ impl AuthorityObject for DatabaseAuthority {
             .inspect_err(|err| error!("{}", err))
             .instrument(span),
         )
+    }
+
+    // fix handling of this as this always take self.origin
+    // also admin is always same serial numbers need to match
+    fn soa(&self) -> BoxedLookupFuture {
+        let origin: Name = self.origin().into();
+        let supported_algorithms = self.0.supported_algorithms;
+        BoxedLookupFuture::from(
+            async move {
+                let soa = SOA::new(
+                    origin.clone(),
+                    origin.clone(),
+                    1,
+                    28800,
+                    7200,
+                    604800,
+                    86400,
+                );
+                let record = Record::from_rdata(origin, 100, RData::SOA(soa));
+                let record_set = RecordSet::from(record);
+                let records =
+                    LookupRecords::new(false, supported_algorithms, Arc::from(record_set));
+                let records = Box::new(records) as Box<dyn LookupObject>;
+                Ok(records)
+            }
+            .in_current_span(),
+        )
+    }
+
+    fn soa_secure(
+        &self,
+        _is_secure: bool,
+        _supported_algorithms: SupportedAlgorithms,
+    ) -> BoxedLookupFuture {
+        self.soa()
     }
 
     fn get_nsec_records(

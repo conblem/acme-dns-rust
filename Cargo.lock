@@ -1672,6 +1672,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f1d0fef1604ba8f7a073c7e701f213e056707210e9020af4528e0101ce11a6"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "simple_asn1"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2030,8 +2039,10 @@ dependencies = [
  "mio-uds",
  "num_cpus",
  "pin-project-lite",
+ "signal-hook-registry",
  "slab",
  "tokio-macros",
+ "winapi 0.3.9",
 ]
 
 [[package]]

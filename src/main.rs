@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use std::env;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
+use tokio::signal::ctrl_c;
 use tracing::{debug, error, info, Instrument};
 
 use crate::acme::DatabasePersist;
@@ -64,9 +65,16 @@ fn run() -> Result<()> {
                 CertManager::new(pool, persist, config.general.acme).and_then(CertManager::spawn);
 
             info!("Starting API Cert Manager and DNS");
-            tokio::try_join!(api, cert_manager, dns.spawn())?;
-
-            Ok(())
+            tokio::select! {
+                res = api => res,
+                res = cert_manager => res,
+                res = dns.spawn() => res,
+                res = ctrl_c() => {
+                    res?;
+                    info!("Ctrl C pressed");
+                    Ok(())
+                }
+            }
         }
         .in_current_span(),
     );
