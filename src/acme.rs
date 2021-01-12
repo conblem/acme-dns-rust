@@ -73,9 +73,10 @@ impl Persist for DatabasePersist {
                 .await?;
 
             transaction.commit().await
-        };
+        }
+        .in_current_span();
 
-        self.handle.block_on(fut.in_current_span()).map_err(error)
+        self.handle.block_on(fut).map_err(error)
     }
 
     #[tracing::instrument(name = "DatabasePersist::get", err, skip(self))]
