@@ -159,19 +159,19 @@ impl DatabaseAuthorityInner {
 #[allow(dead_code)]
 impl AuthorityObject for DatabaseAuthority {
     fn zone_type(&self) -> ZoneType {
-        ZoneType::Master
+        ZoneType::Primary
     }
 
     fn is_axfr_allowed(&self) -> bool {
         false
     }
 
-    fn update(&mut self, _update: &MessageRequest) -> UpdateResult<bool> {
+    fn update(&self, _update: &MessageRequest) -> UpdateResult<bool> {
         Ok(false)
     }
 
-    fn origin(&self) -> &LowerName {
-        &self.0.lower
+    fn origin(&self) -> LowerName {
+        self.0.lower.clone()
     }
 
     fn lookup(

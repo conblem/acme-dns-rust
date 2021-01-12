@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::future::Future;
 use tokio::net::{ToSocketAddrs, UdpSocket};
-use tokio::runtime::Runtime;
 use tracing::field::{debug, Empty};
 use tracing::{info_span, Instrument, Span};
 use trust_dns_server::authority::{AuthorityObject, Catalog};

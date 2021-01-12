@@ -13,6 +13,7 @@ use crate::acme::DatabasePersist;
 use crate::api::Api;
 use crate::cert::CertManager;
 use crate::dns::{DatabaseAuthority, DNS};
+use std::sync::Arc;
 
 mod acme;
 mod api;
@@ -38,12 +39,12 @@ fn run() -> Result<()> {
     let config_path = env::args().nth(1);
     let config = config::load_config(config_path)?;
 
-    let runtime = Runtime::new()?;
+    let runtime = Arc::new(Runtime::new()?);
     debug!("Created runtime");
 
     // Async closure cannot be move, if runtime gets moved into it
     // it gets dropped inside an async call
-    let res: Result<()> = runtime.handle().block_on(
+    let res: Result<()> = runtime.block_on(
         async {
             debug!("Running in runtime");
 
@@ -60,9 +61,9 @@ fn run() -> Result<()> {
             )
             .and_then(Api::spawn);
 
-            let persist = DatabasePersist::new(pool.clone(), runtime.handle());
+            let persist = DatabasePersist::new(pool.clone(), &runtime);
             let cert_manager =
-                CertManager::new(pool, persist, config.general.acme).and_then(CertManager::spawn);
+                CertManager::new(pool, persist, config.general.acme, &runtime).and_then(CertManager::spawn);
 
             info!("Starting API Cert Manager and DNS");
             tokio::select! {

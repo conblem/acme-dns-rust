@@ -2,22 +2,23 @@ use acme_lib::persist::{Persist, PersistKey, PersistKind};
 use futures_util::TryStreamExt;
 use sqlx::{Pool, Postgres};
 use sqlx::{Row, Transaction};
-use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
 use tracing::Instrument;
 
 use crate::util::{error, to_i64};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct DatabasePersist {
     pool: Pool<Postgres>,
-    handle: Handle,
+    runtime: Arc<Runtime>
 }
 
 impl DatabasePersist {
-    pub fn new(pool: Pool<Postgres>, handle: &Handle) -> Self {
+    pub fn new(pool: Pool<Postgres>, runtime: &Arc<Runtime>) -> Self {
         DatabasePersist {
             pool,
-            handle: handle.clone(),
+            runtime: Arc::clone(runtime)
         }
     }
 }
@@ -76,7 +77,7 @@ impl Persist for DatabasePersist {
         }
         .in_current_span();
 
-        self.handle.block_on(fut).map_err(error)
+        self.runtime.block_on(fut).map_err(error)
     }
 
     #[tracing::instrument(name = "DatabasePersist::get", err, skip(self))]
@@ -91,7 +92,7 @@ impl Persist for DatabasePersist {
         .bind(persist_kind(kind))
         .fetch(&self.pool);
 
-        match self.handle.block_on(rows.try_next().in_current_span()) {
+        match self.runtime.block_on(rows.try_next().in_current_span()) {
             Ok(Some(row)) => row.try_get("value").map_err(error),
             Ok(None) => Ok(None),
             Err(e) => Err(error(e)),

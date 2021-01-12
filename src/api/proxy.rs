@@ -2,7 +2,6 @@ use bytes::buf::{Buf, BufMut};
 use futures_util::future::{ready, BoxFuture, FutureExt};
 use futures_util::io::Cursor;
 use std::future::Future;
-use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};

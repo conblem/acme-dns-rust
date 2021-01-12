@@ -3,7 +3,7 @@ use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use anyhow::{anyhow, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
 use std::time::Duration;
-use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
 use tokio::time::Interval;
 use tracing::{error, info, Instrument, Span};
 use uuid::Uuid;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::acme::DatabasePersist;
 use crate::domain::{Domain, DomainFacade};
 use crate::util::{now, to_i64, HOUR};
+use std::sync::Arc;
 
 #[derive(sqlx::Type, Debug, PartialEq, Clone)]
 #[repr(i32)]
@@ -155,11 +156,12 @@ impl CertFacade {
 pub struct CertManager {
     pool: PgPool,
     directory: Directory<DatabasePersist>,
+    runtime: Arc<Runtime>
 }
 
 impl CertManager {
     #[tracing::instrument(name = "CertManager::new", skip(pool, persist))]
-    pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> Result<Self> {
+    pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String, runtime: &Arc<Runtime>) -> Result<Self> {
         let span = Span::current();
         let directory = tokio::task::spawn_blocking(move || {
             let _enter = span.enter();
@@ -167,7 +169,7 @@ impl CertManager {
         })
         .await??;
 
-        Ok(CertManager { pool, directory })
+        Ok(CertManager { pool, directory, runtime: Arc::clone(runtime) })
     }
 
     // maybe useless function
@@ -216,13 +218,14 @@ impl CertManager {
 
         let directory = self.directory.clone();
         let pool = self.pool.clone();
+        let runtime = Arc::clone(&self.runtime);
 
         let span = Span::current();
         let cert = tokio::task::spawn_blocking(move || {
             let _span = span.enter();
             let account = directory.account("acme-dns-rust@byom.de")?;
             let order = account.new_order("acme.conblem.me", &[])?;
-            CertManager::validate(memory_cert, domain, order, &pool)
+            CertManager::validate(memory_cert, domain, order, &pool, &runtime)
         })
         .await??;
 
@@ -236,6 +239,7 @@ impl CertManager {
         mut domain: Domain,
         mut order: NewOrder<DatabasePersist>,
         pool: &PgPool,
+        runtime: &Runtime
     ) -> Result<Cert> {
         let ord_csr = loop {
             if let Some(ord_csr) = order.confirm_validations() {
@@ -251,7 +255,7 @@ impl CertManager {
 
             domain.txt = Some(chall.dns_proof());
             let update = DomainFacade::update_domain(pool, &domain);
-            Handle::current().block_on(update.in_current_span())?;
+            runtime.block_on(update.in_current_span())?;
 
             chall.validate(5000)?;
             order.refresh()?;
