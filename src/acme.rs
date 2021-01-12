@@ -1,8 +1,8 @@
 use acme_lib::persist::{Persist, PersistKey, PersistKind};
+use futures_util::TryStreamExt;
 use sqlx::{Pool, Postgres};
 use sqlx::{Row, Transaction};
 use tokio::runtime::Handle;
-use tokio::stream::StreamExt;
 use tracing::Instrument;
 
 use crate::util::{error, to_i64};

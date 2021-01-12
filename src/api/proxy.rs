@@ -6,7 +6,7 @@ use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, Result as IoResult};
 use tokio::net::TcpStream;
 
 pub(super) trait PeerAddr<E: std::error::Error> {
@@ -72,27 +72,8 @@ impl PeerAddr<tokio::io::Error> for ProxyStream {
 }
 
 impl AsyncRead for ProxyStream {
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        self.stream.prepare_uninitialized_buffer(buf)
-    }
-
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, tokio::io::Error>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<IoResult<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
-    }
-
-    fn poll_read_buf<B: BufMut>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<Result<usize, tokio::io::Error>>
-    where
-        Self: Sized,
-    {
-        Pin::new(&mut self.stream).poll_read_buf(cx, buf)
     }
 }
 
@@ -117,16 +98,5 @@ impl AsyncWrite for ProxyStream {
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), tokio::io::Error>> {
         Pin::new(&mut self.stream).poll_shutdown(cx)
-    }
-
-    fn poll_write_buf<B: Buf>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<Result<usize, tokio::io::Error>>
-    where
-        Self: Sized,
-    {
-        Pin::new(&mut self.stream).poll_write_buf(cx, buf)
     }
 }

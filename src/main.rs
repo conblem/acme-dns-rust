@@ -49,7 +49,7 @@ fn run() -> Result<()> {
             let pool = setup_database(&config.general.db).await?;
             let authority =
                 DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
-            let dns = DNS::new(&config.general.dns, &runtime, authority);
+            let dns = DNS::new(&config.general.dns, authority);
 
             let api = Api::new(
                 config.api.http.as_deref(),

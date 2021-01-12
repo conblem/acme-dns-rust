@@ -15,15 +15,14 @@ mod parse;
 pub use self::authority::DatabaseAuthority;
 use crate::dns::handler::TraceRequestHandler;
 
-pub struct DNS<'a, A> {
+pub struct DNS<A> {
     server: ServerFuture<TraceRequestHandler>,
     addr: A,
-    runtime: &'a Runtime,
     span: Span,
 }
 
-impl<'a, A: 'a + ToSocketAddrs> DNS<'a, A> {
-    pub fn new(addr: A, runtime: &'a Runtime, authority: Box<dyn AuthorityObject>) -> Self {
+impl<A: ToSocketAddrs> DNS<A> {
+    pub fn new(addr: A, authority: Box<dyn AuthorityObject>) -> Self {
         let span = info_span!("DNS::spawn", local.addr = Empty);
 
         let mut catalog = Catalog::new();
@@ -35,17 +34,16 @@ impl<'a, A: 'a + ToSocketAddrs> DNS<'a, A> {
         DNS {
             server,
             addr,
-            runtime,
             span,
         }
     }
 
-    pub fn spawn(mut self) -> impl 'a + Future<Output = Result<()>> {
+    pub fn spawn(mut self) -> impl Future<Output = Result<()>> {
         let span = self.span.clone();
         async move {
             let udp = UdpSocket::bind(self.addr).await?;
             self.span.record("local.addr", &debug(udp.local_addr()));
-            self.server.register_socket(udp, self.runtime);
+            self.server.register_socket(udp);
 
             tokio::spawn(self.server.block_until_done()).await??;
 
