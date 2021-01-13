@@ -1,14 +1,16 @@
 use futures_util::future::{ready, BoxFuture, FutureExt};
+use ppp::error::ParseError;
+use ppp::model::Addresses;
 use std::future::Future;
 use std::io::{Cursor, IoSlice, Write};
 use std::mem::MaybeUninit;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, Result as IoResult};
+use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::TcpStream;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 
-pub(super) trait PeerAddr<E: std::error::Error> {
+pub(super) trait PeerAddr<E: std::error::Error>: AsyncRead + AsyncWrite {
     fn proxy_peer<'a>(&'a mut self) -> BoxFuture<'a, Result<SocketAddr, E>>;
 }
 
@@ -39,7 +41,7 @@ impl<'a> Future for PeerAddrFuture<'a> {
             None => unreachable!("Future cannot be polled anymore"),
         };
 
-        let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
+        let mut buf = [MaybeUninit::<u8>::uninit(); 256];
         let mut buf = ReadBuf::uninit(&mut buf);
 
         let stream = Pin::new(&mut this.stream);
@@ -53,7 +55,39 @@ impl<'a> Future for PeerAddrFuture<'a> {
             return Poll::Ready(Err(e));
         }
 
-        Poll::Pending
+        let data = data.get_ref();
+        let res = match ppp::parse_header(data) {
+            Err(ParseError::Incomplete) => return Poll::Pending,
+            Err(ParseError::Failure) => {
+                return Poll::Ready(Err(IoError::new(
+                    ErrorKind::InvalidData,
+                    "Proxy Parser Error",
+                )))
+            }
+            Ok((remaining, res)) => {
+                this.start_of_data = data.len() - remaining.len();
+                res
+            }
+        };
+
+        let addr = match res.addresses {
+            Addresses::IPv4 { source_address, source_port , .. } => {
+                let port = source_port.unwrap_or_default();
+                SocketAddrV4::new(source_address.into(), port).into()
+            },
+            Addresses::IPv6 { source_address, source_port ,.. } => {
+                let port = source_port.unwrap_or_default();
+                SocketAddrV6::new(source_address.into(), port, 0, 0).into()
+            },
+            address => {
+                return Poll::Ready(Err(IoError::new(
+                    ErrorKind::Other,
+                    format!("Cannot convert {:?} to a SocketAddr", address),
+                )))
+            }
+        };
+
+        Poll::Ready(Ok(addr))
     }
 }
 

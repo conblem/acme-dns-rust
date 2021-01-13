@@ -86,7 +86,7 @@ pub(super) fn stream<S, O, E, P>(
 where
     P: std::error::Error + Send + Sync,
     S: Stream<Item = Result<O, E>> + Send,
-    O: AsyncRead + AsyncWrite + Send + Unpin + PeerAddr<P> + 'static,
+    O: PeerAddr<P> + Send + Unpin + 'static,
     E: Into<Error> + Send,
 {
     let acceptor = Acceptor::new(pool);
