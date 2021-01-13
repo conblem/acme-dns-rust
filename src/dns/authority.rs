@@ -174,6 +174,10 @@ impl AuthorityObject for DatabaseAuthority {
         self.0.lower.clone()
     }
 
+    fn box_clone(&self) -> Box<(dyn AuthorityObject + 'static)> {
+        Box::new(DatabaseAuthority(Arc::clone(&self.0)))
+    }
+
     fn lookup(
         &self,
         _name: &LowerName,

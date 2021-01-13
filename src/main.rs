@@ -62,8 +62,8 @@ fn run() -> Result<()> {
             .and_then(Api::spawn);
 
             let persist = DatabasePersist::new(pool.clone(), &runtime);
-            let cert_manager =
-                CertManager::new(pool, persist, config.general.acme, &runtime).and_then(CertManager::spawn);
+            let cert_manager = CertManager::new(pool, persist, config.general.acme, &runtime)
+                .and_then(CertManager::spawn);
 
             info!("Starting API Cert Manager and DNS");
             tokio::select! {

@@ -7,6 +7,7 @@ use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 use tracing::{debug_span, info};
 use tracing_futures::Instrument;
+use tokio_stream::wrappers::TcpListenerStream;
 
 mod metrics;
 mod proxy;
@@ -14,9 +15,9 @@ mod routes;
 mod tls;
 
 pub struct Api {
-    http: Option<TcpListener>,
-    https: Option<TcpListener>,
-    prom: Option<TcpListener>,
+    http: Option<TcpListenerStream>,
+    https: Option<TcpListenerStream>,
+    prom: Option<TcpListenerStream>,
     pool: PgPool,
 }
 
@@ -34,9 +35,9 @@ impl Api {
         let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
         Ok(Api {
-            http,
-            https,
-            prom,
+            http: http.map(TcpListenerStream::new),
+            https: https.map(TcpListenerStream::new),
+            prom: prom.map(TcpListenerStream::new),
             pool,
         })
     }
@@ -50,7 +51,7 @@ impl Api {
         let http = self
             .http
             .map(|http| {
-                let addr = http.local_addr();
+                let addr = http.as_ref().local_addr();
                 http.instrument(debug_span!("HTTP", local.addr = ?addr))
             })
             .map(|http| warp::serve(routes.clone()).serve_incoming(http))
@@ -60,7 +61,7 @@ impl Api {
         let https = self
             .https
             .map(|https| {
-                let addr = https.local_addr();
+                let addr = https.as_ref().local_addr();
                 tls::stream(https, pool).instrument(debug_span!("HTTPS", local.addr = ?addr))
             })
             .map(|https| warp::serve(routes).serve_incoming(https))
@@ -69,7 +70,7 @@ impl Api {
         let prom = self
             .prom
             .map(|prom| {
-                let addr = prom.local_addr();
+                let addr = prom.as_ref().local_addr();
                 prom.instrument(debug_span!("PROM", local.addr = ?addr))
             })
             .map(|prom| warp::serve(metrics()).serve_incoming(prom))

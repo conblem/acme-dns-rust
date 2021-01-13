@@ -156,12 +156,17 @@ impl CertFacade {
 pub struct CertManager {
     pool: PgPool,
     directory: Directory<DatabasePersist>,
-    runtime: Arc<Runtime>
+    runtime: Arc<Runtime>,
 }
 
 impl CertManager {
     #[tracing::instrument(name = "CertManager::new", skip(pool, persist))]
-    pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String, runtime: &Arc<Runtime>) -> Result<Self> {
+    pub async fn new(
+        pool: PgPool,
+        persist: DatabasePersist,
+        acme: String,
+        runtime: &Arc<Runtime>,
+    ) -> Result<Self> {
         let span = Span::current();
         let directory = tokio::task::spawn_blocking(move || {
             let _enter = span.enter();
@@ -169,7 +174,11 @@ impl CertManager {
         })
         .await??;
 
-        Ok(CertManager { pool, directory, runtime: Arc::clone(runtime) })
+        Ok(CertManager {
+            pool,
+            directory,
+            runtime: Arc::clone(runtime),
+        })
     }
 
     // maybe useless function
@@ -239,7 +248,7 @@ impl CertManager {
         mut domain: Domain,
         mut order: NewOrder<DatabasePersist>,
         pool: &PgPool,
-        runtime: &Runtime
+        runtime: &Runtime,
     ) -> Result<Cert> {
         let ord_csr = loop {
             if let Some(ord_csr) = order.confirm_validations() {

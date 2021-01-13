@@ -11,14 +11,14 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct DatabasePersist {
     pool: Pool<Postgres>,
-    runtime: Arc<Runtime>
+    runtime: Arc<Runtime>,
 }
 
 impl DatabasePersist {
     pub fn new(pool: Pool<Postgres>, runtime: &Arc<Runtime>) -> Self {
         DatabasePersist {
             pool,
-            runtime: Arc::clone(runtime)
+            runtime: Arc::clone(runtime),
         }
     }
 }

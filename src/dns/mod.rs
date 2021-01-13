@@ -30,11 +30,7 @@ impl<A: ToSocketAddrs> DNS<A> {
 
         let server = ServerFuture::new(request_handler);
 
-        DNS {
-            server,
-            addr,
-            span,
-        }
+        DNS { server, addr, span }
     }
 
     pub fn spawn(mut self) -> impl Future<Output = Result<()>> {

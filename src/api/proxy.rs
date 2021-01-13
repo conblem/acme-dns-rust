@@ -1,7 +1,6 @@
-use bytes::buf::{Buf, BufMut};
 use futures_util::future::{ready, BoxFuture, FutureExt};
-use futures_util::io::Cursor;
 use std::future::Future;
+use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -14,14 +13,14 @@ pub(super) trait PeerAddr<E: std::error::Error> {
 
 struct PeerAddrFuture<'a> {
     stream: Pin<&'a mut TcpStream>,
-    data: Cursor<Vec<u8>>,
+    data: Vec<u8>,
 }
 
 impl<'a> PeerAddrFuture<'a> {
     fn new(stream: &'a mut TcpStream) -> Self {
         PeerAddrFuture {
             stream: Pin::new(stream),
-            data: Cursor::default(),
+            data: vec![],
         }
     }
 }
@@ -31,18 +30,17 @@ impl<'a> Future for PeerAddrFuture<'a> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let peer_addr_future: &mut Self = self.get_mut();
-        let mut stream = peer_addr_future.stream.as_mut();
-        let data = &mut peer_addr_future.data;
-        let position = data.position() as usize;
+        let stream = peer_addr_future.stream.as_mut();
+        let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
+        let mut buf = ReadBuf::uninit(&mut buf);
 
-        let _test = stream.poll_peek(cx, data.get_mut().as_mut());
-
-        let size = match stream.poll_read(cx, &mut data.get_mut()[position..]) {
-            Poll::Ready(Ok(size)) => size as u64,
+        let data = match stream.poll_read(cx, &mut buf) {
+            Poll::Ready(Ok(_)) => buf.filled_mut(),
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Pending => return Poll::Pending,
         };
-        data.set_position(position as u64 + size);
+
+        peer_addr_future.data.copy_from_slice(data);
 
         Poll::Pending
     }
@@ -71,7 +69,11 @@ impl PeerAddr<tokio::io::Error> for ProxyStream {
 }
 
 impl AsyncRead for ProxyStream {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<IoResult<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<IoResult<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
     }
 }
