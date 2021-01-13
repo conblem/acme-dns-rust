@@ -1,78 +1,82 @@
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 use futures_util::future::OptionFuture;
-use futures_util::stream::{BoxStream, Stream};
-use futures_util::{FutureExt, StreamExt, TryStreamExt};
+use futures_util::stream::{Stream, TryStream};
+use futures_util::{FutureExt, TryStreamExt};
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
 use tokio::io::{Error as IoError, Result as IoResult};
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug_span, info};
+use tracing::info;
+use tokio::io::{AsyncWrite, AsyncRead};
 
-use crate::api::proxy::{PeerAddr, ProxyStream};
-use futures_util::io::{AsyncRead, AsyncWrite};
+use crate::api::proxy::{ProxyProtocol, ToProxyStream};
 
 mod metrics;
 mod proxy;
 mod routes;
 mod tls;
 
-type Connection = Box<dyn PeerAddr<IoError> + Send + Unpin + 'static>;
-type Listener = BoxStream<'static, IoResult<Connection>>;
-
-pub struct Api<H, S> {
+pub struct Api<H, P, S> {
     http: Option<H>,
     https: Option<S>,
-    prom: Option<H>,
+    prom: Option<P>,
     pool: PgPool,
 }
 
-impl <H, S> Api<H, S> {
-    fn prepare_listener(listener: TcpListener, proxy: bool) -> Listener {
-        let listener = match listener {
-            Some(listener) => TcpListenerStream::new(listener),
-            None => return None,
-        };
+pub async fn new<A: ToSocketAddrs>(
+    (http, http_proxy): (Option<A>, bool),
+    (https, https_proxy): (Option<A>, bool),
+    (prom, prom_proxy): (Option<A>, bool),
+    pool: PgPool,
+) -> Result<
+    Api<
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin>> + Send,
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin>> + Send,
+        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin, Error>>
+        + Send,
+    >,
+> {
+    let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
+    let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
+    let prom = OptionFuture::from(prom.map(TcpListener::bind)).map(Option::transpose);
 
-        let mapper = match proxy {
-            true => |stream| Box::new(ProxyStream::from(stream)) as Connection,
-            false => |stream| Box::new(stream) as Connection
-        };
+    let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
-        let listener = listener
-            .map_ok(mapper)
-            .boxed();
+    let http = http.map(|http| {
+        let http =
+            TcpListenerStream::new(http).map_ok(|stream| stream.source(ProxyProtocol::Enabled));
+        proxy::wrap(http).try_buffer_unordered(100)
+    });
+    let https = https.map(|https| {
+        let https =
+            TcpListenerStream::new(https).map_ok(|stream| stream.source(ProxyProtocol::Enabled));
+        tls::stream(https, pool.clone())
+    });
+    let prom = prom.map(|prom| {
+        let prom =
+            TcpListenerStream::new(prom).map_ok(|stream| stream.source(ProxyProtocol::Enabled));
+        proxy::wrap(prom).try_buffer_unordered(100)
+    });
 
-        Some(listener)
-    }
+    Ok(Api {
+        http,
+        https,
+        prom,
+        pool,
+    })
+}
 
-    pub async fn new<A: ToSocketAddrs>(
-        (http, http_proxy): (Option<A>, bool),
-        (https, https_proxy): (Option<A>, bool),
-        (prom, prom_proxy): (Option<A>, bool),
-        pool: PgPool,
-    ) -> Result<Api<
-        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
-        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
-    >> {
-        let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
-        let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
-        let prom = OptionFuture::from(prom.map(TcpListener::bind)).map(Option::transpose);
-
-        let (http, https, prom) = tokio::try_join!(http, https, prom)?;
-
-        let http = Api::prepare_listener(http, http_proxy);
-        let https = Api::prepare_listener(https, https_proxy);
-        let prom = Api::prepare_listener(prom, prom_proxy);
-
-        Ok(Api {
-            http: proxy::wrap(http).try_buffer_unordered(100),
-            https: tls::stream(https, pool.clone()),
-            prom: proxy::wrap(prom).try_buffer_unordered(100),
-            pool,
-        })
-    }
+impl<H, P, S> Api<H, P, S>
+    where
+        H: TryStream<Error = IoError> + Send + Unpin + 'static,
+        H::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    P: TryStream<Error = IoError> + Send + Unpin + 'static,
+    P::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    S: TryStream<Error = Error> + Send + Unpin + 'static,
+    S::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
 
     #[tracing::instrument(name = "Api::spawn", skip(self))]
     pub async fn spawn(self) -> Result<()> {
@@ -82,30 +86,17 @@ impl <H, S> Api<H, S> {
 
         let http = self
             .http
-            .map(|http|
-                proxy::wrap(http).try_buffer_unordered(100)
-            )
             .map(|http| warp::serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
         let pool = self.pool.clone();
         let https = self
             .https
-            .map(|https| {
-                //let addr = https.as_ref().local_addr();
-                tls::stream(https, pool)
-                //.instrument(debug_span!("HTTPS", local.addr = ?addr))
-            })
             .map(|https| warp::serve(routes).serve_incoming(https))
             .map(tokio::spawn);
 
         let prom = self
             .prom
-            .map(|prom| {
-                //let addr = prom.as_ref().local_addr();
-                prom
-                //.instrument(debug_span!("PROM", local.addr = ?addr))
-            })
             .map(|prom| warp::serve(metrics()).serve_incoming(prom))
             .map(tokio::spawn);
 

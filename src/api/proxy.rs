@@ -1,4 +1,3 @@
-use futures_util::future::{ready, BoxFuture, FutureExt};
 use futures_util::stream::{Stream, TryStream};
 use futures_util::TryStreamExt;
 use ppp::error::ParseError;
@@ -7,7 +6,6 @@ use std::future::Future;
 use std::io::{Cursor, IoSlice, Write};
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::ops::DerefMut;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
@@ -15,13 +13,35 @@ use tokio::net::TcpStream;
 use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument, Span};
 
-pub(super) fn wrap<S, O, E, P>(
+// wrap tcplistener instead of tcpstream
+pub(super) enum ProxyProtocol {
+    Enabled,
+    Disabled,
+}
+
+pub(super) trait ToProxyStream: Sized {
+    fn source(self, proxy: ProxyProtocol) -> ProxyStream;
+}
+
+impl ToProxyStream for TcpStream {
+    fn source(self, proxy: ProxyProtocol) -> ProxyStream {
+        let data = match proxy {
+            ProxyProtocol::Enabled => Some(Default::default()),
+            ProxyProtocol::Disabled => None,
+        };
+        ProxyStream {
+            stream: self,
+            data,
+            start_of_data: 0,
+        }
+    }
+}
+
+pub(super) fn wrap<S, E>(
     stream: S,
 ) -> impl Stream<Item = Result<impl Future<Output = Result<impl AsyncRead + AsyncWrite, E>>, E>>
 where
-    P: std::error::Error,
-    S: TryStream<Ok = O, Error = E>,
-    O: PeerAddr<P>,
+    S: TryStream<Ok = ProxyStream, Error = E>,
 {
     stream.map_ok(|mut conn| {
         let span = debug_span!("ADDR", remote.addr = Empty);
@@ -41,16 +61,6 @@ where
         }
         .instrument(span)
     })
-}
-
-pub(super) trait PeerAddr<E: std::error::Error>: AsyncRead + AsyncWrite {
-    fn proxy_peer<'a>(&'a mut self) -> BoxFuture<'a, Result<SocketAddr, E>>;
-}
-
-impl PeerAddr<tokio::io::Error> for TcpStream {
-    fn proxy_peer(&mut self) -> BoxFuture<IoResult<SocketAddr>> {
-        ready(self.peer_addr()).boxed()
-    }
 }
 
 struct PeerAddrFuture<'a> {
@@ -126,16 +136,17 @@ impl<'a> Future for PeerAddrFuture<'a> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        let stream = &mut this.stream;
 
-        let data = match &mut this.stream.data {
+        let data = match &mut stream.data {
             Some(ref mut data) => data,
-            None => unreachable!("Future cannot be polled anymore"),
+            None => return Poll::Ready(stream.stream.local_addr()),
         };
 
         let mut buf = [MaybeUninit::<u8>::uninit(); 256];
         let mut buf = ReadBuf::uninit(&mut buf);
 
-        let stream = Pin::new(&mut this.stream.stream);
+        let stream = Pin::new(&mut stream.stream);
         let buf = match stream.poll_read(cx, &mut buf) {
             Poll::Ready(Ok(_)) => buf.filled(),
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -156,19 +167,9 @@ pub(super) struct ProxyStream {
     start_of_data: usize,
 }
 
-impl From<TcpStream> for ProxyStream {
-    fn from(stream: TcpStream) -> Self {
-        ProxyStream {
-            stream,
-            data: Some(Default::default()),
-            start_of_data: 0,
-        }
-    }
-}
-
-impl PeerAddr<tokio::io::Error> for ProxyStream {
-    fn proxy_peer(&mut self) -> BoxFuture<IoResult<SocketAddr>> {
-        PeerAddrFuture::new(self).boxed()
+impl ProxyStream {
+    fn proxy_peer(&mut self) -> PeerAddrFuture<'_> {
+        PeerAddrFuture::new(self)
     }
 }
 
@@ -214,11 +215,5 @@ impl AsyncWrite for ProxyStream {
 
     fn is_write_vectored(&self) -> bool {
         self.stream.is_write_vectored()
-    }
-}
-
-impl<E: std::error::Error> PeerAddr<E> for Box<(dyn PeerAddr<E> + Send + Unpin + 'static)> {
-    fn proxy_peer<'a>(&'a mut self) -> BoxFuture<'a, Result<SocketAddr, E>> {
-        self.deref_mut().proxy_peer()
     }
 }

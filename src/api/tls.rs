@@ -10,7 +10,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use super::proxy::{wrap, PeerAddr};
+use super::proxy::wrap;
+use crate::api::proxy::ProxyStream;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
 
@@ -78,14 +79,12 @@ impl Acceptor {
     }
 }
 
-pub(super) fn stream<S, O, E, P>(
+pub(super) fn stream<S, E>(
     listener: S,
     pool: PgPool,
 ) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
 where
-    P: std::error::Error + Send + Sync + 'static,
-    S: Stream<Item = Result<O, E>> + Send + 'static,
-    O: PeerAddr<P> + Send + Unpin + 'static,
+    S: Stream<Item = Result<ProxyStream, E>> + Send + 'static,
     E: Into<Error> + Send + 'static,
 {
     let acceptor = Acceptor::new(pool);

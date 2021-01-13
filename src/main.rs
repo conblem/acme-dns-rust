@@ -8,12 +8,12 @@ use std::str::FromStr;
 use tokio::runtime::Runtime;
 use tokio::signal::ctrl_c;
 use tracing::{debug, error, info, Instrument};
-
-use crate::acme::DatabasePersist;
-use crate::api::Api;
-use crate::cert::CertManager;
-use crate::dns::{DatabaseAuthority, DNS};
 use std::sync::Arc;
+
+use acme::DatabasePersist;
+use cert::CertManager;
+use dns::{DatabaseAuthority, DNS};
+use api::Api;
 
 mod acme;
 mod api;
@@ -54,7 +54,7 @@ fn run() -> Result<()> {
             let dns = DNS::new(&config.general.dns, authority);
 
             let api = &config.api;
-            let api = Api::new(
+            let api = api::new(
                 (api.http.as_deref(), api.http_proxy),
                 (api.https.as_deref(), api.https_proxy),
                 (api.prom.as_deref(), api.prom_proxy),
