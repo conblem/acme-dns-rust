@@ -11,6 +11,7 @@ dependencies = [
  "hyper",
  "lazy_static",
  "parking_lot",
+ "ppp",
  "prometheus",
  "rustls 0.19.0",
  "serde",
@@ -85,6 +86,12 @@ name = "anyhow"
 version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf8dcb5b4bbaa28653b647d8c77bd4ed40183b48882e130c1f1ffb73de069fd7"
+
+[[package]]
+name = "arrayvec"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
 name = "async-trait"
@@ -874,6 +881,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lexical-core"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db65c6da02e61f55dae90a0ae427b2a5f6b3e8db09f58d10efab23af92592616"
+dependencies = [
+ "arrayvec",
+ "bitflags",
+ "cfg-if 0.1.10",
+ "ryu",
+ "static_assertions",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1000,6 +1020,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
  "smallvec",
+]
+
+[[package]]
+name = "nom"
+version = "5.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
+dependencies = [
+ "lexical-core",
+ "memchr",
+ "version_check",
 ]
 
 [[package]]
@@ -1254,6 +1285,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d36492546b6af1463394d46f0c834346f31548646f6ba10849802c9c9a27ac33"
 
 [[package]]
+name = "ppp"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f7f25ebcb127b52a846ffefb48f67a56996ee75742500ad05a3398dbbd3950d"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1282,11 +1322,11 @@ dependencies = [
 
 [[package]]
 name = "prometheus"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d70cf4412832bcac9cffe27906f4a66e450d323525e977168c70d1b36120ae"
+checksum = "c8425533e7122f0c3cc7a37e6244b16ad3a2cc32ae7ac6276e2a75da0d9c200d"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "fnv",
  "lazy_static",
  "parking_lot",
@@ -1842,6 +1882,12 @@ checksum = "b0437cfb83762844799a60e1e3b489d5ceb6a650fbacb86437badc1b6d87b246"
 dependencies = [
  "version_check",
 ]
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stdweb"

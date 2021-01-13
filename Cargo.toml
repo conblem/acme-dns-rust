@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 hyper = { version = "0.14.2", features = ["stream", "http1", "http2", "server", "runtime"] }
 lazy_static = "1.4"
-prometheus = "0.10"
+prometheus = "0.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
 tracing-futures = { version = "0.2.4", features = ["futures-03"] }
@@ -39,6 +39,7 @@ futures-util = "0.3"
 rustls = "0.19"
 toml = "0.5"
 anyhow = "1.0"
+ppp = "1.2"
 
 [features]
 default = ["postgres"]
