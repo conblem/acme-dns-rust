@@ -8,8 +8,14 @@ use tracing::{debug, info, info_span};
 #[derive(Deserialize, Debug)]
 pub struct Api {
     pub http: Option<String>,
+    #[serde(default)]
+    pub http_proxy: bool,
     pub https: Option<String>,
+    #[serde(default)]
+    pub https_proxy: bool,
     pub prom: Option<String>,
+    #[serde(default)]
+    pub prom_proxy: bool,
 }
 
 fn default_acme() -> String {

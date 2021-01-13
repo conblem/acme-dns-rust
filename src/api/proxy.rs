@@ -7,12 +7,13 @@ use std::future::Future;
 use std::io::{Cursor, IoSlice, Write};
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::ops::DerefMut;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::TcpStream;
 use tracing::field::{display, Empty};
-use tracing::{debug_span, error, info, Instrument};
+use tracing::{debug_span, error, info, Instrument, Span};
 
 pub(super) fn wrap<S, O, E, P>(
     stream: S,
@@ -24,8 +25,8 @@ where
 {
     stream.map_ok(|mut conn| {
         let span = debug_span!("ADDR", remote.addr = Empty);
-        let span_two = span.clone();
         async move {
+            let span = Span::current();
             match conn.proxy_peer().await {
                 Ok(addr) => {
                     span.record("remote.addr", &display(addr));
@@ -38,7 +39,7 @@ where
             }
             Ok(conn)
         }
-        .instrument(span_two)
+        .instrument(span)
     })
 }
 
@@ -124,8 +125,8 @@ impl<'a> Future for PeerAddrFuture<'a> {
     type Output = IoResult<SocketAddr>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = &mut self.get_mut();
-        // add option again to make impossible to pull future later
+        let this = self.get_mut();
+
         let data = match &mut this.stream.data {
             Some(ref mut data) => data,
             None => unreachable!("Future cannot be polled anymore"),
@@ -136,7 +137,7 @@ impl<'a> Future for PeerAddrFuture<'a> {
 
         let stream = Pin::new(&mut this.stream.stream);
         let buf = match stream.poll_read(cx, &mut buf) {
-            Poll::Ready(Ok(_)) => buf.filled_mut(),
+            Poll::Ready(Ok(_)) => buf.filled(),
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Pending => return Poll::Pending,
         };
@@ -178,7 +179,7 @@ impl AsyncRead for ProxyStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<IoResult<()>> {
         let this = self.get_mut();
-        // handle the case were the full data has no space in the first place
+        // todo: handle the case were the data has no space in buf
         if let Some(data) = this.data.take() {
             buf.put_slice(&data.get_ref()[this.start_of_data..])
         }
@@ -213,5 +214,11 @@ impl AsyncWrite for ProxyStream {
 
     fn is_write_vectored(&self) -> bool {
         self.stream.is_write_vectored()
+    }
+}
+
+impl<E: std::error::Error> PeerAddr<E> for Box<(dyn PeerAddr<E> + Send + Unpin + 'static)> {
+    fn proxy_peer<'a>(&'a mut self) -> BoxFuture<'a, Result<SocketAddr, E>> {
+        self.deref_mut().proxy_peer()
     }
 }

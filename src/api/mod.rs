@@ -1,45 +1,75 @@
-use anyhow::Result;
+use anyhow::{Result, Error};
 use futures_util::future::OptionFuture;
-use futures_util::{FutureExt, TryStreamExt};
+use futures_util::stream::{BoxStream, Stream};
+use futures_util::{FutureExt, StreamExt, TryStreamExt};
+use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
+use tokio::io::{Error as IoError, Result as IoResult};
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug_span, info};
-use tracing_futures::Instrument;
 
-use metrics::{metrics, metrics_wrapper};
-use proxy::ProxyStream;
+use crate::api::proxy::{PeerAddr, ProxyStream};
+use futures_util::io::{AsyncRead, AsyncWrite};
 
 mod metrics;
 mod proxy;
 mod routes;
 mod tls;
 
-pub struct Api {
-    http: Option<TcpListenerStream>,
-    https: Option<TcpListenerStream>,
-    prom: Option<TcpListenerStream>,
+type Connection = Box<dyn PeerAddr<IoError> + Send + Unpin + 'static>;
+type Listener = BoxStream<'static, IoResult<Connection>>;
+
+pub struct Api<H, S> {
+    http: Option<H>,
+    https: Option<S>,
+    prom: Option<H>,
     pool: PgPool,
 }
 
-impl Api {
+impl <H, S> Api<H, S> {
+    fn prepare_listener(listener: TcpListener, proxy: bool) -> Listener {
+        let listener = match listener {
+            Some(listener) => TcpListenerStream::new(listener),
+            None => return None,
+        };
+
+        let mapper = match proxy {
+            true => |stream| Box::new(ProxyStream::from(stream)) as Connection,
+            false => |stream| Box::new(stream) as Connection
+        };
+
+        let listener = listener
+            .map_ok(mapper)
+            .boxed();
+
+        Some(listener)
+    }
+
     pub async fn new<A: ToSocketAddrs>(
-        http: Option<A>,
-        https: Option<A>,
-        prom: Option<A>,
+        (http, http_proxy): (Option<A>, bool),
+        (https, https_proxy): (Option<A>, bool),
+        (prom, prom_proxy): (Option<A>, bool),
         pool: PgPool,
-    ) -> Result<Self> {
+    ) -> Result<Api<
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
+        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
+    >> {
         let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
         let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
         let prom = OptionFuture::from(prom.map(TcpListener::bind)).map(Option::transpose);
 
         let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
+        let http = Api::prepare_listener(http, http_proxy);
+        let https = Api::prepare_listener(https, https_proxy);
+        let prom = Api::prepare_listener(prom, prom_proxy);
+
         Ok(Api {
-            http: http.map(TcpListenerStream::new),
-            https: https.map(TcpListenerStream::new),
-            prom: prom.map(TcpListenerStream::new),
+            http: proxy::wrap(http).try_buffer_unordered(100),
+            https: tls::stream(https, pool.clone()),
+            prom: proxy::wrap(prom).try_buffer_unordered(100),
             pool,
         })
     }
@@ -52,12 +82,9 @@ impl Api {
 
         let http = self
             .http
-            .map(|http| {
-                let addr = http.as_ref().local_addr();
-                proxy::wrap(http.map_ok(ProxyStream::from))
-                    .try_buffer_unordered(100)
-                    .instrument(debug_span!("HTTP", local.addr = ?addr))
-            })
+            .map(|http|
+                proxy::wrap(http).try_buffer_unordered(100)
+            )
             .map(|http| warp::serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
@@ -65,9 +92,9 @@ impl Api {
         let https = self
             .https
             .map(|https| {
-                let addr = https.as_ref().local_addr();
-                let https = https.map_ok(ProxyStream::from);
-                tls::stream(https, pool).instrument(debug_span!("HTTPS", local.addr = ?addr))
+                //let addr = https.as_ref().local_addr();
+                tls::stream(https, pool)
+                //.instrument(debug_span!("HTTPS", local.addr = ?addr))
             })
             .map(|https| warp::serve(routes).serve_incoming(https))
             .map(tokio::spawn);
@@ -75,8 +102,9 @@ impl Api {
         let prom = self
             .prom
             .map(|prom| {
-                let addr = prom.as_ref().local_addr();
-                prom.instrument(debug_span!("PROM", local.addr = ?addr))
+                //let addr = prom.as_ref().local_addr();
+                prom
+                //.instrument(debug_span!("PROM", local.addr = ?addr))
             })
             .map(|prom| warp::serve(metrics()).serve_incoming(prom))
             .map(tokio::spawn);

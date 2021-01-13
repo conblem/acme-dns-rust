@@ -53,10 +53,11 @@ fn run() -> Result<()> {
                 DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
             let dns = DNS::new(&config.general.dns, authority);
 
+            let api = &config.api;
             let api = Api::new(
-                config.api.http.as_deref(),
-                config.api.https.as_deref(),
-                config.api.prom.as_deref(),
+                (api.http.as_deref(), api.http_proxy),
+                (api.https.as_deref(), api.https_proxy),
+                (api.prom.as_deref(), api.prom_proxy),
                 pool.clone(),
             )
             .and_then(Api::spawn);
