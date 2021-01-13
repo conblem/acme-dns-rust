@@ -2,11 +2,11 @@ use acme_lib::persist::{Persist, PersistKey, PersistKind};
 use futures_util::TryStreamExt;
 use sqlx::{Pool, Postgres};
 use sqlx::{Row, Transaction};
+use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tracing::Instrument;
 
 use crate::util::{error, to_i64};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct DatabasePersist {

@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use super::proxy::wrap;
+use super::proxy;
 use crate::api::proxy::ProxyStream;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
@@ -89,7 +89,7 @@ where
 {
     let acceptor = Acceptor::new(pool);
 
-    wrap(listener.err_into())
+    proxy::wrap(listener.err_into())
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
         .map_ok(|(conn, acceptor)| async move {

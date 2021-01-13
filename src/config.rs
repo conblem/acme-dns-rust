@@ -1,21 +1,46 @@
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use tracing::{debug, info, info_span};
 
+#[derive(Debug, Copy, Clone)]
+pub enum ProxyProtocol {
+    Enabled,
+    Disabled,
+}
+
+impl Default for ProxyProtocol {
+    fn default() -> Self {
+        ProxyProtocol::Disabled
+    }
+}
+
+impl<'de> Deserialize<'de> for ProxyProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match bool::deserialize(deserializer) {
+            Ok(true) => Ok(ProxyProtocol::Enabled),
+            Ok(false) => Ok(ProxyProtocol::Disabled),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Api {
     pub http: Option<String>,
     #[serde(default)]
-    pub http_proxy: bool,
+    pub http_proxy: ProxyProtocol,
     pub https: Option<String>,
     #[serde(default)]
-    pub https_proxy: bool,
+    pub https_proxy: ProxyProtocol,
     pub prom: Option<String>,
     #[serde(default)]
-    pub prom_proxy: bool,
+    pub prom_proxy: ProxyProtocol,
 }
 
 fn default_acme() -> String {

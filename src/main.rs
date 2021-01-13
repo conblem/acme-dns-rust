@@ -5,15 +5,15 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
 use std::env;
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::signal::ctrl_c;
 use tracing::{debug, error, info, Instrument};
-use std::sync::Arc;
 
 use acme::DatabasePersist;
+use api::Api;
 use cert::CertManager;
 use dns::{DatabaseAuthority, DNS};
-use api::Api;
 
 mod acme;
 mod api;
@@ -55,9 +55,9 @@ fn run() -> Result<()> {
 
             let api = &config.api;
             let api = api::new(
-                (api.http.as_deref(), api.http_proxy),
-                (api.https.as_deref(), api.https_proxy),
-                (api.prom.as_deref(), api.prom_proxy),
+                (api.http.clone(), api.http_proxy),
+                (api.https.clone(), api.https_proxy),
+                (api.prom.clone(), api.prom_proxy),
                 pool.clone(),
             )
             .and_then(Api::spawn);

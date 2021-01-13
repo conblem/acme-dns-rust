@@ -13,11 +13,9 @@ use tokio::net::TcpStream;
 use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument, Span};
 
+use crate::config::ProxyProtocol;
+
 // wrap tcplistener instead of tcpstream
-pub(super) enum ProxyProtocol {
-    Enabled,
-    Disabled,
-}
 
 pub(super) trait ToProxyStream: Sized {
     fn source(self, proxy: ProxyProtocol) -> ProxyStream;

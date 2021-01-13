@@ -4,14 +4,15 @@ use futures_util::stream::{Stream, TryStream};
 use futures_util::{FutureExt, TryStreamExt};
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{Error as IoError, Result as IoResult};
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::info;
-use tokio::io::{AsyncWrite, AsyncRead};
 
-use crate::api::proxy::{ProxyProtocol, ToProxyStream};
+use crate::config::ProxyProtocol;
+use proxy::ToProxyStream;
 
 mod metrics;
 mod proxy;
@@ -26,16 +27,15 @@ pub struct Api<H, P, S> {
 }
 
 pub async fn new<A: ToSocketAddrs>(
-    (http, http_proxy): (Option<A>, bool),
-    (https, https_proxy): (Option<A>, bool),
-    (prom, prom_proxy): (Option<A>, bool),
+    (http, http_proxy): (Option<A>, ProxyProtocol),
+    (https, https_proxy): (Option<A>, ProxyProtocol),
+    (prom, prom_proxy): (Option<A>, ProxyProtocol),
     pool: PgPool,
 ) -> Result<
     Api<
-        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin>> + Send,
-        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin>> + Send,
-        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin, Error>>
-        + Send,
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
+        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send,
     >,
 > {
     let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
@@ -45,18 +45,15 @@ pub async fn new<A: ToSocketAddrs>(
     let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
     let http = http.map(|http| {
-        let http =
-            TcpListenerStream::new(http).map_ok(|stream| stream.source(ProxyProtocol::Enabled));
+        let http = TcpListenerStream::new(http).map_ok(move |stream| stream.source(http_proxy));
         proxy::wrap(http).try_buffer_unordered(100)
     });
     let https = https.map(|https| {
-        let https =
-            TcpListenerStream::new(https).map_ok(|stream| stream.source(ProxyProtocol::Enabled));
+        let https = TcpListenerStream::new(https).map_ok(move |stream| stream.source(https_proxy));
         tls::stream(https, pool.clone())
     });
-    let prom = prom.map(|prom| {
-        let prom =
-            TcpListenerStream::new(prom).map_ok(|stream| stream.source(ProxyProtocol::Enabled));
+    let prom = prom.map(move |prom| {
+        let prom = TcpListenerStream::new(prom).map_ok(move |stream| stream.source(prom_proxy));
         proxy::wrap(prom).try_buffer_unordered(100)
     });
 
@@ -69,15 +66,14 @@ pub async fn new<A: ToSocketAddrs>(
 }
 
 impl<H, P, S> Api<H, P, S>
-    where
-        H: TryStream<Error = IoError> + Send + Unpin + 'static,
-        H::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+where
+    H: TryStream<Error = IoError> + Send + Unpin + 'static,
+    H::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     P: TryStream<Error = IoError> + Send + Unpin + 'static,
     P::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     S: TryStream<Error = Error> + Send + Unpin + 'static,
     S::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-
     #[tracing::instrument(name = "Api::spawn", skip(self))]
     pub async fn spawn(self) -> Result<()> {
         info!("Starting API spawn");
@@ -89,7 +85,6 @@ impl<H, P, S> Api<H, P, S>
             .map(|http| warp::serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);
 
-        let pool = self.pool.clone();
         let https = self
             .https
             .map(|https| warp::serve(routes).serve_incoming(https))
