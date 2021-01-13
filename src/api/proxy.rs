@@ -12,32 +12,33 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::TcpStream;
 use tracing::field::{display, Empty};
-use tracing::{debug_span, error, Instrument};
+use tracing::{debug_span, error, info, Instrument};
 
 pub(super) fn wrap<S, O, E, P>(
-    listener: S,
-) -> impl Stream<
-    Item = Result<impl Future<Output = impl AsyncRead + AsyncWrite + Send + Unpin + 'static>, E>,
-> + Send
+    stream: S,
+) -> impl Stream<Item = Result<impl Future<Output = Result<impl AsyncRead + AsyncWrite, E>>, E>>
 where
-    P: std::error::Error + Send + Sync,
-    S: TryStream<Ok = O, Error = E> + Send,
-    O: PeerAddr<P> + Send + Unpin + 'static,
-    E: Send,
+    P: std::error::Error,
+    S: TryStream<Ok = O, Error = E>,
+    O: PeerAddr<P>,
 {
-    listener.map_ok(|mut conn| async move {
+    stream.map_ok(|mut conn| {
         let span = debug_span!("ADDR", remote.addr = Empty);
-        let addr = conn.proxy_peer().instrument(span.clone());
-        match addr.await {
-            Ok(addr) => {
-                span.record("remote.addr", &display(addr));
+        let span_two = span.clone();
+        async move {
+            match conn.proxy_peer().await {
+                Ok(addr) => {
+                    span.record("remote.addr", &display(addr));
+                    info!("Got addr {}", addr)
+                }
+                Err(e) => {
+                    span.record("remote.addr", &"Unknown");
+                    error!("Could net get remote.addr: {}", e);
+                }
             }
-            Err(e) => {
-                span.record("remote.addr", &"Unknown");
-                span.in_scope(|| error!("Could net get remote.addr: {}", e));
-            }
+            Ok(conn)
         }
-        conn
+        .instrument(span_two)
     })
 }
 

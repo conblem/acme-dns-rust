@@ -54,7 +54,9 @@ impl Api {
             .http
             .map(|http| {
                 let addr = http.as_ref().local_addr();
-                http.instrument(debug_span!("HTTP", local.addr = ?addr))
+                proxy::wrap(http.map_ok(ProxyStream::from))
+                    .try_buffer_unordered(100)
+                    .instrument(debug_span!("HTTP", local.addr = ?addr))
             })
             .map(|http| warp::serve(routes.clone()).serve_incoming(http))
             .map(tokio::spawn);

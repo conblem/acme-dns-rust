@@ -8,10 +8,9 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::TlsAcceptor;
-use tracing::field::{display, Empty};
-use tracing::{debug_span, error, info, Instrument};
+use tracing::{error, info};
 
-use super::proxy::PeerAddr;
+use super::proxy::{wrap, PeerAddr};
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
 
@@ -84,31 +83,19 @@ pub(super) fn stream<S, O, E, P>(
     pool: PgPool,
 ) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
 where
-    P: std::error::Error + Send + Sync,
-    S: Stream<Item = Result<O, E>> + Send,
+    P: std::error::Error + Send + Sync + 'static,
+    S: Stream<Item = Result<O, E>> + Send + 'static,
     O: PeerAddr<P> + Send + Unpin + 'static,
-    E: Into<Error> + Send,
+    E: Into<Error> + Send + 'static,
 {
     let acceptor = Acceptor::new(pool);
 
-    listener
+    wrap(listener.err_into())
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
-        .err_into()
-        .map_ok(|(mut conn, acceptor)| async move {
-            let span = debug_span!("TLS", remote.addr = Empty);
-            let addr = conn.proxy_peer().instrument(span.clone());
-            match addr.await {
-                Ok(addr) => {
-                    span.record("remote.addr", &display(addr));
-                }
-                Err(e) => {
-                    span.record("remote.addr", &"Unknown");
-                    span.in_scope(|| error!("Could net get remote.addr: {}", e));
-                }
-            }
-            let tls = acceptor.load_cert().instrument(span.clone()).await?;
-            Ok(tls.accept(conn).instrument(span).await?)
+        .map_ok(|(conn, acceptor)| async move {
+            let (conn, tls) = tokio::try_join!(conn, acceptor.load_cert())?;
+            Ok(tls.accept(conn).await?)
         })
         .try_buffer_unordered(100)
         .inspect_err(|err| error!("Stream error: {:?}", err))
