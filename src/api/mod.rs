@@ -5,9 +5,9 @@ use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
+use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug_span, info};
 use tracing_futures::Instrument;
-use tokio_stream::wrappers::TcpListenerStream;
 
 mod metrics;
 mod proxy;
