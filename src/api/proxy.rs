@@ -1,14 +1,45 @@
 use futures_util::future::{ready, BoxFuture, FutureExt};
+use futures_util::stream::{Stream, TryStream};
+use futures_util::TryStreamExt;
 use ppp::error::ParseError;
-use ppp::model::Addresses;
+use ppp::model::{Addresses, Header};
 use std::future::Future;
 use std::io::{Cursor, IoSlice, Write};
 use std::mem::MaybeUninit;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::TcpStream;
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use tracing::field::{display, Empty};
+use tracing::{debug_span, error, Instrument};
+
+pub(super) fn wrap<S, O, E, P>(
+    listener: S,
+) -> impl Stream<
+    Item = Result<impl Future<Output = impl AsyncRead + AsyncWrite + Send + Unpin + 'static>, E>,
+> + Send
+where
+    P: std::error::Error + Send + Sync,
+    S: TryStream<Ok = O, Error = E> + Send,
+    O: PeerAddr<P> + Send + Unpin + 'static,
+    E: Send,
+{
+    listener.map_ok(|mut conn| async move {
+        let span = debug_span!("ADDR", remote.addr = Empty);
+        let addr = conn.proxy_peer().instrument(span.clone());
+        match addr.await {
+            Ok(addr) => {
+                span.record("remote.addr", &display(addr));
+            }
+            Err(e) => {
+                span.record("remote.addr", &"Unknown");
+                span.in_scope(|| error!("Could net get remote.addr: {}", e));
+            }
+        }
+        conn
+    })
+}
 
 pub(super) trait PeerAddr<E: std::error::Error>: AsyncRead + AsyncWrite {
     fn proxy_peer<'a>(&'a mut self) -> BoxFuture<'a, Result<SocketAddr, E>>;
@@ -28,15 +59,73 @@ impl<'a> PeerAddrFuture<'a> {
     fn new(stream: &'a mut ProxyStream) -> Self {
         PeerAddrFuture { stream }
     }
+
+    fn parse_header(&mut self) -> Poll<IoResult<Header>> {
+        let data = match self.stream.data {
+            Some(ref mut data) => data.get_ref(),
+            None => unreachable!("Future cannot be pulled anymore"),
+        };
+
+        match ppp::parse_header(data) {
+            Err(ParseError::Incomplete) => Poll::Pending,
+            Err(ParseError::Failure) => Poll::Ready(Err(IoError::new(
+                ErrorKind::InvalidData,
+                "Proxy Parser Error",
+            ))),
+            Ok((remaining, res)) => {
+                self.stream.start_of_data = data.len() - remaining.len();
+                Poll::Ready(Ok(res))
+            }
+        }
+    }
+
+    fn format_header(res: Header) -> Poll<<Self as Future>::Output> {
+        let addr = match res.addresses {
+            Addresses::IPv4 {
+                source_address,
+                source_port,
+                ..
+            } => {
+                let port = source_port.unwrap_or_default();
+                SocketAddrV4::new(source_address.into(), port).into()
+            }
+            Addresses::IPv6 {
+                source_address,
+                source_port,
+                ..
+            } => {
+                let port = source_port.unwrap_or_default();
+                SocketAddrV6::new(source_address.into(), port, 0, 0).into()
+            }
+            address => {
+                return Poll::Ready(Err(IoError::new(
+                    ErrorKind::Other,
+                    format!("Cannot convert {:?} to a SocketAddr", address),
+                )))
+            }
+        };
+
+        Poll::Ready(Ok(addr))
+    }
+
+    fn get_header(&mut self) -> Poll<<Self as Future>::Output> {
+        let res = match self.parse_header() {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Ready(Ok(res)) => res,
+        };
+
+        PeerAddrFuture::format_header(res)
+    }
 }
 
 impl<'a> Future for PeerAddrFuture<'a> {
     type Output = IoResult<SocketAddr>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = &mut self.get_mut().stream;
+        let this = &mut self.get_mut();
         // add option again to make impossible to pull future later
-        let data = match &mut this.data {
+        let data = match &mut this.stream.data {
             Some(ref mut data) => data,
             None => unreachable!("Future cannot be polled anymore"),
         };
@@ -44,7 +133,7 @@ impl<'a> Future for PeerAddrFuture<'a> {
         let mut buf = [MaybeUninit::<u8>::uninit(); 256];
         let mut buf = ReadBuf::uninit(&mut buf);
 
-        let stream = Pin::new(&mut this.stream);
+        let stream = Pin::new(&mut this.stream.stream);
         let buf = match stream.poll_read(cx, &mut buf) {
             Poll::Ready(Ok(_)) => buf.filled_mut(),
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -55,39 +144,7 @@ impl<'a> Future for PeerAddrFuture<'a> {
             return Poll::Ready(Err(e));
         }
 
-        let data = data.get_ref();
-        let res = match ppp::parse_header(data) {
-            Err(ParseError::Incomplete) => return Poll::Pending,
-            Err(ParseError::Failure) => {
-                return Poll::Ready(Err(IoError::new(
-                    ErrorKind::InvalidData,
-                    "Proxy Parser Error",
-                )))
-            }
-            Ok((remaining, res)) => {
-                this.start_of_data = data.len() - remaining.len();
-                res
-            }
-        };
-
-        let addr = match res.addresses {
-            Addresses::IPv4 { source_address, source_port , .. } => {
-                let port = source_port.unwrap_or_default();
-                SocketAddrV4::new(source_address.into(), port).into()
-            },
-            Addresses::IPv6 { source_address, source_port ,.. } => {
-                let port = source_port.unwrap_or_default();
-                SocketAddrV6::new(source_address.into(), port, 0, 0).into()
-            },
-            address => {
-                return Poll::Ready(Err(IoError::new(
-                    ErrorKind::Other,
-                    format!("Cannot convert {:?} to a SocketAddr", address),
-                )))
-            }
-        };
-
-        Poll::Ready(Ok(addr))
+        this.get_header()
     }
 }
 

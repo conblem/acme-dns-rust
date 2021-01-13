@@ -1,13 +1,15 @@
 use anyhow::Result;
 use futures_util::future::OptionFuture;
-use futures_util::FutureExt;
-use metrics::{metrics, metrics_wrapper};
+use futures_util::{FutureExt, TryStreamExt};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug_span, info};
 use tracing_futures::Instrument;
+
+use metrics::{metrics, metrics_wrapper};
+use proxy::ProxyStream;
 
 mod metrics;
 mod proxy;
@@ -62,6 +64,7 @@ impl Api {
             .https
             .map(|https| {
                 let addr = https.as_ref().local_addr();
+                let https = https.map_ok(ProxyStream::from);
                 tls::stream(https, pool).instrument(debug_span!("HTTPS", local.addr = ?addr))
             })
             .map(|https| warp::serve(routes).serve_incoming(https))
