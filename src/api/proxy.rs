@@ -10,9 +10,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_stream::wrappers::TcpListenerStream;
 use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument, Span};
-use tokio_stream::wrappers::TcpListenerStream;
 
 use crate::config::ProxyProtocol;
 
