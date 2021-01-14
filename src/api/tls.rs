@@ -1,19 +1,20 @@
 use anyhow::{anyhow, Error, Result};
-use futures_util::stream::{repeat, Stream};
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::stream::{repeat, ErrInto, Stream, Zip};
+use futures_util::{StreamExt, TryStreamExt, FutureExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::TlsAcceptor;
+use tokio::io::{AsyncRead, AsyncWrite, Error as IoError};
+use tokio_rustls::{TlsAcceptor, Accept};
 use tracing::{error, info};
 
-use super::proxy;
-use crate::api::proxy::ProxyStream;
+use super::proxy::ProxyListener;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
+use futures_util::stream::Repeat;
+use std::future::Future;
 
 struct Acceptor {
     pool: PgPool,
@@ -79,25 +80,93 @@ impl Acceptor {
     }
 }
 
-pub(super) fn stream<S, E>(
-    listener: S,
+trait Tuple {
+    type A;
+    type B;
+}
+
+impl<A, B> Tuple for (A, B) {
+    type A = A;
+    type B = B;
+}
+
+trait ResultInherit {
+    type Ok;
+    type Error;
+}
+
+impl<T, E> ResultInherit for Result<T, E> {
+    type Ok = T;
+    type Error = E;
+}
+
+trait ToTlsListener {
+    fn tls(self, pool: PgPool) -> ProxyListener<IoError>;
+}
+
+type TlsListenerBeforeMap = Zip<ErrInto<ProxyListener<IoError>, Error>, Repeat<Arc<Acceptor>>>;
+
+type MapResultOutput = Result<
+    (
+        <<<TlsListenerBeforeMap as Stream>::Item as Tuple>::A as ResultInherit>::Ok,
+        Arc<Acceptor>,
+    ),
+    <<<TlsListenerBeforeMap as Stream>::Item as Tuple>::A as ResultInherit>::Error,
+>;
+
+type MapResult = fn(<TlsListenerBeforeMap as Stream>::Item) -> MapResultOutput;
+
+fn map_result((listener, acceptor): <TlsListenerBeforeMap as Stream>::Item) -> MapResultOutput {
+    listener.map(|listener| (listener, acceptor))
+}
+
+pub(super) fn stream(
+    listener: ProxyListener<IoError>,
     pool: PgPool,
 ) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
-where
-    S: Stream<Item = Result<ProxyStream, E>> + Send + 'static,
-    E: Into<Error> + Send + 'static,
 {
     let acceptor = Acceptor::new(pool);
 
-    proxy::wrap(listener.err_into())
+    listener
+        .err_into()
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
         .map_ok(|(conn, acceptor)| async move {
-            let (conn, tls) = tokio::try_join!(conn, acceptor.load_cert())?;
+            let tls = acceptor.load_cert().await?;
             Ok(tls.accept(conn).await?)
         })
         .try_buffer_unordered(100)
         .inspect_err(|err| error!("Stream error: {:?}", err))
         .filter(|stream| futures_util::future::ready(stream.is_ok()))
         .into_stream()
+}
+
+enum PrepareTlsFuture {
+    Start(ProxyListener<IoError>, Arc<Acceptor>),
+    LoadingCert()
+
+}
+struct PrepareTlsFuture {
+    listener: Option<ProxyListener<IoError>>,
+    accept: Option<Accept<ProxyListener<IoError>>>
+    acceptor: Arc<Acceptor>
+}
+
+impl Future for PrepareTlsFuture {
+    type Output = Result<Accept<ProxyListener<IoError>>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let tls = match this.acceptor.load_cert().poll_unpin(cx)? {
+            Err(e) => return Poll::Ready(Err(e)),
+            Ok(tls) => tls,
+        };
+
+        let stream = match this.listener.take() {
+            Some(stream) => stream,
+            None => unreachable!("Future cannot be polled anymore"),
+        };
+
+        match tls.accept(stream)
+    }
 }

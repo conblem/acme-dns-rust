@@ -1,4 +1,4 @@
-use futures_util::stream::{MapOk, Stream, TryBufferUnordered, TryStream};
+use futures_util::stream::{MapOk, Stream, TryBufferUnordered};
 use futures_util::{FutureExt, StreamExt, TryStreamExt};
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
@@ -13,17 +13,48 @@ use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Res
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::field::{display, Empty};
+use tracing::instrument::Instrumented;
 use tracing::{debug_span, error, info, Instrument, Span};
 
 use crate::config::ProxyProtocol;
-use tracing::instrument::Instrumented;
 
-struct ProxyListener {
+pub(super) type WrapOutput<E> = Instrumented<ProxyStreamFuture<E>>;
+pub(super) type Wrap<E> = fn(conn: ProxyStream) -> WrapOutput<E>;
+pub(super) type ProxyListener<E> = TryBufferUnordered<MapOk<ProxyListenerImpl, Wrap<E>>>;
+
+pub(super) trait ToProxyListener<E>: Sized {
+    fn source(self, proxy: ProxyProtocol) -> ProxyListener<E>;
+}
+
+fn wrap<E>(stream: ProxyStream) -> WrapOutput<E> {
+    let span = debug_span!("ADDR", remote.addr = Empty);
+    ProxyStreamFuture {
+        stream: Some(stream),
+        phantom: PhantomData,
+    }
+    .instrument(span)
+}
+
+impl ToProxyListener<IoError> for TcpListener {
+    fn source(
+        self,
+        proxy: ProxyProtocol,
+    ) -> TryBufferUnordered<MapOk<ProxyListenerImpl, Wrap<IoError>>> {
+        ProxyListenerImpl {
+            listener: TcpListenerStream::new(self),
+            proxy,
+        }
+        .map_ok(wrap as Wrap<IoError>)
+        .try_buffer_unordered(100)
+    }
+}
+
+pub(super) struct ProxyListenerImpl {
     listener: TcpListenerStream,
     proxy: ProxyProtocol,
 }
 
-impl Stream for ProxyListener {
+impl Stream for ProxyListenerImpl {
     type Item = IoResult<ProxyStream>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -53,35 +84,15 @@ impl Stream for ProxyListener {
 
 // wrap tcplistener instead of tcpstream
 
-pub(super) trait ToProxyStream: Sized {
-    fn source(self, proxy: ProxyProtocol) -> ProxyStream;
-}
-
-impl ToProxyStream for TcpStream {
-    fn source(self, proxy: ProxyProtocol) -> ProxyStream {
-        let data = match proxy {
-            ProxyProtocol::Enabled => Some(Default::default()),
-            ProxyProtocol::Disabled => None,
-        };
-        ProxyStream {
-            stream: self,
-            data,
-            start_of_data: 0,
-        }
-    }
-}
-
-struct ProxyStreamFuture<E> {
+pub(super) struct ProxyStreamFuture<E> {
     stream: Option<ProxyStream>,
     phantom: PhantomData<E>,
 }
 
-type Wrap<E> = fn(conn: ProxyStream) -> Instrumented<ProxyStreamFuture<E>>;
-
 impl<E: Unpin> Future for ProxyStreamFuture<E> {
     type Output = Result<ProxyStream, E>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         let span = Span::current();
         let stream = this
@@ -109,24 +120,7 @@ impl<E: Unpin> Future for ProxyStreamFuture<E> {
     }
 }
 
-pub(super) fn wrap(
-    listener: TcpListener,
-) -> TryBufferUnordered<MapOk<ProxyListener, Wrap<IoError>>> {
-    ProxyListener {
-        listener: TcpListenerStream::new(listener),
-        proxy: ProxyProtocol::Enabled,
-    }
-    .map_ok(|mut stream| {
-        let span = debug_span!("test");
-        ProxyStreamFuture {
-            stream: Some(stream),
-            phantom: PhantomData,
-        }
-        .instrument(span)
-    })
-    .try_buffer_unordered(100)
-}
-
+// maybe use state machine
 struct PeerAddrFuture<'a> {
     stream: &'a mut ProxyStream,
 }

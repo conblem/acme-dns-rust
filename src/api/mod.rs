@@ -1,28 +1,27 @@
 use anyhow::{Error, Result};
 use futures_util::future::OptionFuture;
 use futures_util::stream::{Stream, TryStream};
-use futures_util::{FutureExt, TryStreamExt};
+use futures_util::FutureExt;
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
+use tokio::io::Error as IoError;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::io::{Error as IoError, Result as IoResult};
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
-use tokio_stream::wrappers::TcpListenerStream;
 use tracing::info;
 
+use crate::api::proxy::{ProxyListener, ToProxyListener};
 use crate::config::ProxyProtocol;
-use proxy::ToProxyStream;
 
 mod metrics;
 mod proxy;
 mod routes;
 mod tls;
 
-pub struct Api<H, P, S> {
-    http: Option<H>,
+pub struct Api<S> {
+    http: Option<ProxyListener<IoError>>,
     https: Option<S>,
-    prom: Option<P>,
+    prom: Option<ProxyListener<IoError>>,
     pool: PgPool,
 }
 
@@ -33,8 +32,6 @@ pub async fn new<A: ToSocketAddrs>(
     pool: PgPool,
 ) -> Result<
     Api<
-        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
-        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
         impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send,
     >,
 > {
@@ -44,18 +41,11 @@ pub async fn new<A: ToSocketAddrs>(
 
     let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
-    let http = http.map(|http| {
-        let http = TcpListenerStream::new(http).map_ok(move |stream| stream.source(http_proxy));
-        proxy::wrap(http).try_buffer_unordered(100)
-    });
-    let https = https.map(|https| {
-        let https = TcpListenerStream::new(https).map_ok(move |stream| stream.source(https_proxy));
-        tls::stream(https, pool.clone())
-    });
-    let prom = prom.map(move |prom| {
-        let prom = TcpListenerStream::new(prom).map_ok(move |stream| stream.source(prom_proxy));
-        proxy::wrap(prom).try_buffer_unordered(100)
-    });
+    let http = http.map(|http| http.source(http_proxy));
+    let https = https
+        .map(|https| https.source(https_proxy))
+        .map(|listener| tls::stream(listener, pool.clone()));
+    let prom = prom.map(|prom| prom.source(prom_proxy));
 
     Ok(Api {
         http,
@@ -65,12 +55,8 @@ pub async fn new<A: ToSocketAddrs>(
     })
 }
 
-impl<H, P, S> Api<H, P, S>
+impl<S> Api<S>
 where
-    H: TryStream<Error = IoError> + Send + Unpin + 'static,
-    H::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    P: TryStream<Error = IoError> + Send + Unpin + 'static,
-    P::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     S: TryStream<Error = Error> + Send + Unpin + 'static,
     S::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
