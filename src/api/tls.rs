@@ -6,14 +6,34 @@ use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use super::proxy;
-use crate::api::proxy::ProxyStream;
+use super::proxy::ProxyStream;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
+
+pub(super) fn wrap(
+    listener: impl Stream<Item = IoResult<ProxyStream>> + Send,
+    pool: PgPool,
+) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
+{
+    let acceptor = Acceptor::new(pool);
+
+    listener
+        .err_into()
+        .zip(repeat(acceptor))
+        .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
+        .map_ok(|(conn, acceptor)| async move {
+            let tls = acceptor.load_cert().await?;
+            Ok(tls.accept(conn).await?)
+        })
+        .try_buffer_unordered(100)
+        .inspect_err(|err| error!("Stream error: {:?}", err))
+        .filter(|stream| futures_util::future::ready(stream.is_ok()))
+        .into_stream()
+}
 
 struct Acceptor {
     pool: PgPool,
@@ -77,27 +97,4 @@ impl Acceptor {
         info!("Created new TLS config");
         Ok(TlsAcceptor::from(server_config))
     }
-}
-
-pub(super) fn stream<S, E>(
-    listener: S,
-    pool: PgPool,
-) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
-where
-    S: Stream<Item = Result<ProxyStream, E>> + Send + 'static,
-    E: Into<Error> + Send + 'static,
-{
-    let acceptor = Acceptor::new(pool);
-
-    proxy::wrap(listener.err_into())
-        .zip(repeat(acceptor))
-        .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
-        .map_ok(|(conn, acceptor)| async move {
-            let (conn, tls) = tokio::try_join!(conn, acceptor.load_cert())?;
-            Ok(tls.accept(conn).await?)
-        })
-        .try_buffer_unordered(100)
-        .inspect_err(|err| error!("Stream error: {:?}", err))
-        .filter(|stream| futures_util::future::ready(stream.is_ok()))
-        .into_stream()
 }
