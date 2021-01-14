@@ -1,19 +1,55 @@
-use futures_util::stream::{Stream, TryStream};
-use futures_util::TryStreamExt;
+use futures_util::stream::{MapOk, Stream, TryBufferUnordered, TryStream};
+use futures_util::{FutureExt, StreamExt, TryStreamExt};
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
 use std::io::{Cursor, IoSlice, Write};
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_stream::wrappers::TcpListenerStream;
 use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument, Span};
 
 use crate::config::ProxyProtocol;
+use tracing::instrument::Instrumented;
+
+struct ProxyListener {
+    listener: TcpListenerStream,
+    proxy: ProxyProtocol,
+}
+
+impl Stream for ProxyListener {
+    type Item = IoResult<ProxyStream>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let stream = match self.listener.poll_next_unpin(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
+            Poll::Ready(Some(Ok(stream))) => stream,
+        };
+
+        let data = match self.proxy {
+            ProxyProtocol::Enabled => Some(Default::default()),
+            ProxyProtocol::Disabled => None,
+        };
+
+        Poll::Ready(Some(Ok(ProxyStream {
+            start_of_data: 0,
+            stream,
+            data,
+        })))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.listener.size_hint()
+    }
+}
 
 // wrap tcplistener instead of tcpstream
 
@@ -35,30 +71,60 @@ impl ToProxyStream for TcpStream {
     }
 }
 
-pub(super) fn wrap<S, E>(
-    stream: S,
-) -> impl Stream<Item = Result<impl Future<Output = Result<impl AsyncRead + AsyncWrite, E>>, E>>
-where
-    S: TryStream<Ok = ProxyStream, Error = E>,
-{
-    stream.map_ok(|mut conn| {
-        let span = debug_span!("ADDR", remote.addr = Empty);
-        async move {
-            let span = Span::current();
-            match conn.proxy_peer().await {
-                Ok(addr) => {
-                    span.record("remote.addr", &display(addr));
-                    info!("Got addr {}", addr)
-                }
-                Err(e) => {
-                    span.record("remote.addr", &"Unknown");
-                    error!("Could net get remote.addr: {}", e);
-                }
+struct ProxyStreamFuture<E> {
+    stream: Option<ProxyStream>,
+    phantom: PhantomData<E>,
+}
+
+type Wrap<E> = fn(conn: ProxyStream) -> Instrumented<ProxyStreamFuture<E>>;
+
+impl<E: Unpin> Future for ProxyStreamFuture<E> {
+    type Output = Result<ProxyStream, E>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let span = Span::current();
+        let stream = this
+            .stream
+            .as_mut()
+            .map(ProxyStream::proxy_peer)
+            .map(move |mut fut| fut.poll_unpin(cx));
+        match stream {
+            None => unreachable!("Future cannot be pulled anymore"),
+            Some(Poll::Pending) => return Poll::Pending,
+            Some(Poll::Ready(Ok(addr))) => {
+                span.record("remote.addr", &display(addr));
+                info!("Got addr {}", addr)
             }
-            Ok(conn)
+            Some(Poll::Ready(Err(e))) => {
+                span.record("remote.addr", &"Unknown");
+                error!("Could net get remote.addr: {}", e);
+            }
+        }
+
+        Poll::Ready(Ok(this
+            .stream
+            .take()
+            .expect("Future cannot be pulled anymore")))
+    }
+}
+
+pub(super) fn wrap(
+    listener: TcpListener,
+) -> TryBufferUnordered<MapOk<ProxyListener, Wrap<IoError>>> {
+    ProxyListener {
+        listener: TcpListenerStream::new(listener),
+        proxy: ProxyProtocol::Enabled,
+    }
+    .map_ok(|mut stream| {
+        let span = debug_span!("test");
+        ProxyStreamFuture {
+            stream: Some(stream),
+            phantom: PhantomData,
         }
         .instrument(span)
     })
+    .try_buffer_unordered(100)
 }
 
 struct PeerAddrFuture<'a> {
