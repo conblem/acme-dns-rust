@@ -15,7 +15,6 @@ dependencies = [
  "prometheus",
  "rustls 0.19.0",
  "serde",
- "simplelog",
  "sqlx",
  "tokio",
  "tokio-rustls",
@@ -1678,17 +1677,6 @@ dependencies = [
  "chrono",
  "num-bigint 0.2.6",
  "num-traits",
-]
-
-[[package]]
-name = "simplelog"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2736f58087298a448859961d3f4a0850b832e72619d75adc69da7993c2cd3c"
-dependencies = [
- "chrono",
- "log",
- "termcolor",
 ]
 
 [[package]]
