@@ -104,5 +104,4 @@ where
 }
 
 fn noop<T>(_: T) {
-    ()
 }

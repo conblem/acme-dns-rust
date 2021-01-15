@@ -22,10 +22,9 @@ impl<'de> Deserialize<'de> for ProxyProtocol {
     where
         D: Deserializer<'de>,
     {
-        match bool::deserialize(deserializer) {
-            Ok(true) => Ok(ProxyProtocol::Enabled),
-            Ok(false) => Ok(ProxyProtocol::Disabled),
-            Err(e) => Err(e),
+        match bool::deserialize(deserializer)? {
+            true => Ok(ProxyProtocol::Enabled),
+            false => Ok(ProxyProtocol::Disabled),
         }
     }
 }

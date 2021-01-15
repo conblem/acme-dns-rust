@@ -257,8 +257,7 @@ impl CertManager {
 
             let chall = order
                 .authorizations()?
-                .iter()
-                .next()
+                .get(0)
                 .ok_or_else(|| anyhow!("couldn't unpack auths"))?
                 .dns_challenge();
 

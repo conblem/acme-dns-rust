@@ -36,15 +36,15 @@ async fn register_handler(pool: PgPool) -> Result<impl Reply, Rejection> {
     Ok(res)
 }
 
-const X_API_USER_HEADER: &'static str = "X-Api-User";
-const X_API_KEY_HEADER: &'static str = "X-Api-Key";
+const X_API_USER_HEADER: &str = "X-Api-User";
+const X_API_KEY_HEADER: &str = "X-Api-Key";
 
 async fn update_handler(user: String, key: String, _pool: PgPool) -> Result<impl Reply, Rejection> {
     Ok(format!("{} {}", user, key))
 }
 
-const REGISTER_PATH: &'static str = "register";
-const UPDATE_PATH: &'static str = "update";
+const REGISTER_PATH: &str = "register";
+const UPDATE_PATH: &str = "update";
 
 pub(super) fn routes(
     pool: PgPool,

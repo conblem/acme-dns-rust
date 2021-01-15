@@ -126,7 +126,7 @@ where
     }
 }
 
-const TEXT_PLAIN_MIME: &'static str = "text/plain";
+const TEXT_PLAIN_MIME: &str = "text/plain";
 
 // maybe this implementation is wrong as it removes bucket items aswell
 fn metrics_handler() -> impl Reply {
@@ -154,7 +154,7 @@ fn metrics_handler() -> impl Reply {
         .into_response()
 }
 
-const METRICS_PATH: &'static str = "metrics";
+const METRICS_PATH: &str = "metrics";
 
 pub(super) fn metrics(
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {

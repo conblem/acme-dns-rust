@@ -44,46 +44,40 @@ fn run() -> Result<()> {
 
     // Async closure cannot be move, if runtime gets moved into it
     // it gets dropped inside an async call
-    let res: Result<()> = runtime.block_on(
-        async {
-            debug!("Running in runtime");
+    let fut = async {
+        debug!("Running in runtime");
 
-            let pool = setup_database(&config.general.db).await?;
-            let authority =
-                DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
-            let dns = DNS::new(&config.general.dns, authority);
+        let pool = setup_database(&config.general.db).await?;
+        let authority = DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
+        let dns = DNS::new(&config.general.dns, authority);
 
-            let api = &config.api;
-            let api = api::new(
-                (api.http.clone(), api.http_proxy),
-                (api.https.clone(), api.https_proxy),
-                (api.prom.clone(), api.prom_proxy),
-                pool.clone(),
-            )
-            .and_then(Api::spawn);
+        let api = &config.api;
+        let api = api::new(
+            (api.http.clone(), api.http_proxy),
+            (api.https.clone(), api.https_proxy),
+            (api.prom.clone(), api.prom_proxy),
+            pool.clone(),
+        )
+        .and_then(Api::spawn);
 
-            let persist = DatabasePersist::new(pool.clone(), &runtime);
-            let cert_manager = CertManager::new(pool, persist, config.general.acme, &runtime)
-                .and_then(CertManager::spawn);
+        let persist = DatabasePersist::new(pool.clone(), &runtime);
+        let cert_manager = CertManager::new(pool, persist, config.general.acme, &runtime)
+            .and_then(CertManager::spawn);
 
-            info!("Starting API Cert Manager and DNS");
-            tokio::select! {
-                res = api => res,
-                res = cert_manager => res,
-                res = dns.spawn() => res,
-                res = ctrl_c() => {
-                    res?;
-                    info!("Ctrl C pressed");
-                    Ok(())
-                }
+        info!("Starting API Cert Manager and DNS");
+        tokio::select! {
+            res = api => res,
+            res = cert_manager => res,
+            res = dns.spawn() => res,
+            res = ctrl_c() => {
+                res?;
+                info!("Ctrl C pressed");
+                Ok(())
             }
         }
-        .in_current_span(),
-    );
+    };
 
-    res?;
-
-    Ok(())
+    runtime.block_on(fut.in_current_span())
 }
 
 #[tracing::instrument(skip(db))]
