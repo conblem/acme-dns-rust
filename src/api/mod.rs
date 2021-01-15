@@ -4,13 +4,12 @@ use futures_util::stream::{Stream, TryStream};
 use futures_util::FutureExt;
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
-use tokio::io::Error as IoError;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{Error as IoError, Result as IoResult};
 use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 use tracing::info;
 
-use crate::api::proxy::{ProxyListener, ToProxyListener};
 use crate::config::ProxyProtocol;
 
 mod metrics;
@@ -18,10 +17,10 @@ mod proxy;
 mod routes;
 mod tls;
 
-pub struct Api<S> {
-    http: Option<ProxyListener<IoError>>,
+pub struct Api<H, P, S> {
+    http: Option<H>,
     https: Option<S>,
-    prom: Option<ProxyListener<IoError>>,
+    prom: Option<P>,
     pool: PgPool,
 }
 
@@ -32,7 +31,9 @@ pub async fn new<A: ToSocketAddrs>(
     pool: PgPool,
 ) -> Result<
     Api<
-        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send,
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
+        impl Stream<Item = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
+        impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>> + Send,
     >,
 > {
     let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
@@ -41,11 +42,11 @@ pub async fn new<A: ToSocketAddrs>(
 
     let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
-    let http = http.map(|http| http.source(http_proxy));
+    let http = http.map(move |http| proxy::wrap(http, http_proxy));
+    let prom = prom.map(move |prom| proxy::wrap(prom, prom_proxy));
     let https = https
-        .map(|https| https.source(https_proxy))
-        .map(|listener| tls::stream(listener, pool.clone()));
-    let prom = prom.map(|prom| prom.source(prom_proxy));
+        .map(move |https| proxy::wrap(https, https_proxy))
+        .map(|https| tls::wrap(https, pool.clone()));
 
     Ok(Api {
         http,
@@ -55,8 +56,12 @@ pub async fn new<A: ToSocketAddrs>(
     })
 }
 
-impl<S> Api<S>
+impl<H, P, S> Api<H, P, S>
 where
+    H: TryStream<Error = IoError> + Send + Unpin + 'static,
+    H::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    P: TryStream<Error = IoError> + Send + Unpin + 'static,
+    P::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     S: TryStream<Error = Error> + Send + Unpin + 'static,
     S::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
