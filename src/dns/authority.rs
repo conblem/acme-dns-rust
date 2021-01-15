@@ -223,12 +223,11 @@ impl AuthorityObject for DatabaseAuthority {
                     return authority.acme_challenge(name).await.map_err(error);
                 }
 
-                // todo: improve error handling
                 let txt = match DomainFacade::find_by_id(&authority.pool, &first).await {
                     Ok(Some(Domain { txt: Some(txt), .. })) => txt,
+                    Ok(Some(Domain { txt: None, .. })) => return Ok(LookupRecords::Empty),
                     Ok(None) => return Err(error(anyhow!("Not found"))),
                     Err(e) => return Err(error(e)),
-                    _ => return Ok(LookupRecords::Empty),
                 };
                 let txt = TXT::new(vec![txt]);
                 let record = Record::from_rdata(name, 100, RData::TXT(txt));

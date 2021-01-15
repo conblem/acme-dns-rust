@@ -1,6 +1,8 @@
 use anyhow::Result;
+use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
+use std::fmt::Formatter;
 use std::fs::File;
 use std::io::Read;
 use tracing::{debug, info, info_span};
@@ -11,35 +13,76 @@ pub enum ProxyProtocol {
     Disabled,
 }
 
+impl<'de> Deserialize<'de> for ProxyProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+    {
+        match bool::deserialize(deserializer)? {
+            true => Ok(ProxyProtocol::Enabled),
+            false => Ok(ProxyProtocol::Disabled)
+        }
+    }
+}
+
 impl Default for ProxyProtocol {
     fn default() -> Self {
         ProxyProtocol::Disabled
     }
 }
 
-impl<'de> Deserialize<'de> for ProxyProtocol {
+#[derive(Debug, Clone)]
+pub struct Listener(pub Option<String>, pub ProxyProtocol);
+
+impl<'de> Deserialize<'de> for Listener {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        match bool::deserialize(deserializer)? {
-            true => Ok(ProxyProtocol::Enabled),
-            false => Ok(ProxyProtocol::Disabled),
+        struct ListenerVisitor;
+        impl<'de> Visitor<'de> for ListenerVisitor {
+            type Value = Listener;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("Listener")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Listener(
+                    String::from(value).into(),
+                    ProxyProtocol::Disabled,
+                ))
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Listener(None, ProxyProtocol::Disabled))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let listener = seq.next_element::<String>()?;
+                let proxy = seq.next_element::<ProxyProtocol>()?.unwrap_or_default();
+
+                Ok(Listener(listener, proxy))
+            }
         }
+        deserializer.deserialize_any(ListenerVisitor)
     }
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Api {
-    pub http: Option<String>,
-    #[serde(default)]
-    pub http_proxy: ProxyProtocol,
-    pub https: Option<String>,
-    #[serde(default)]
-    pub https_proxy: ProxyProtocol,
-    pub prom: Option<String>,
-    #[serde(default)]
-    pub prom_proxy: ProxyProtocol,
+    pub http: Listener,
+    pub https: Listener,
+    pub prom: Listener,
 }
 
 fn default_acme() -> String {

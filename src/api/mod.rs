@@ -7,10 +7,9 @@ use sqlx::PgPool;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{Error as IoError, Result as IoResult};
 use tokio::net::TcpListener;
-use tokio::net::ToSocketAddrs;
 use tracing::info;
 
-use crate::config::ProxyProtocol;
+use crate::config::Listener;
 
 mod metrics;
 mod proxy;
@@ -24,10 +23,10 @@ pub struct Api<H, P, S> {
     pool: PgPool,
 }
 
-pub async fn new<A: ToSocketAddrs>(
-    (http, http_proxy): (Option<A>, ProxyProtocol),
-    (https, https_proxy): (Option<A>, ProxyProtocol),
-    (prom, prom_proxy): (Option<A>, ProxyProtocol),
+pub async fn new(
+    Listener(http, http_proxy): Listener,
+    Listener(https, https_proxy): Listener,
+    Listener(prom, prom_proxy): Listener,
     pool: PgPool,
 ) -> Result<
     Api<

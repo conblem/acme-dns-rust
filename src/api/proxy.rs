@@ -80,7 +80,6 @@ impl AsyncRead for ProxyStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<IoResult<()>> {
         let this = self.get_mut();
-        // todo: handle the case were the data has no space in buf
         if let Some(data) = this.data.take() {
             buf.put_slice(&data.get_ref()[this.start_of_data..])
         }

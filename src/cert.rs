@@ -2,6 +2,7 @@ use acme_lib::order::NewOrder;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
 use anyhow::{anyhow, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::time::Interval;
@@ -11,7 +12,6 @@ use uuid::Uuid;
 use crate::acme::DatabasePersist;
 use crate::domain::{Domain, DomainFacade};
 use crate::util::{now, to_i64, HOUR};
-use std::sync::Arc;
 
 #[derive(sqlx::Type, Debug, PartialEq, Clone)]
 #[repr(i32)]
@@ -220,7 +220,6 @@ impl CertManager {
             None => return Ok(()),
         };
 
-        // todo: improve
         let domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await?
             .ok_or_else(|| anyhow!("Could not find domain: {}", &memory_cert.domain))?;

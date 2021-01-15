@@ -53,9 +53,9 @@ fn run() -> Result<()> {
 
         let api = &config.api;
         let api = api::new(
-            (api.http.clone(), api.http_proxy),
-            (api.https.clone(), api.https_proxy),
-            (api.prom.clone(), api.prom_proxy),
+            api.http.clone(),
+            api.https.clone(),
+            api.prom.clone(),
             pool.clone(),
         )
         .and_then(Api::spawn);
