@@ -1,11 +1,11 @@
 use anyhow::Result;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use tracing::{debug, info, info_span};
 
 pub use listener::{Listener, ProxyProtocol};
+pub use records::PreconfiguredRecords;
 
 mod listener;
 mod records;
@@ -35,7 +35,7 @@ pub struct Config {
     pub general: General,
     pub api: Api,
     #[serde(default)]
-    pub records: HashMap<String, Vec<Vec<String>>>,
+    pub records: PreconfiguredRecords,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "config.toml";

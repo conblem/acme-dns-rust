@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures_util::TryFutureExt;
 use sqlx::PgPool;
-use std::collections::HashMap;
 use std::net::IpAddr::V4;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,17 +17,17 @@ use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 
-use super::parse::parse;
 use crate::cert::CertFacade;
 use crate::domain::{Domain, DomainFacade};
 use crate::util::error;
+use crate::config::PreconfiguredRecords;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 
 struct DatabaseAuthorityInner {
     lower: LowerName,
     pool: PgPool,
-    records: HashMap<Name, HashMap<RecordType, Arc<RecordSet>>>,
+    records: PreconfiguredRecords,
     supported_algorithms: SupportedAlgorithms,
 }
 
@@ -36,12 +35,11 @@ impl DatabaseAuthority {
     pub fn new(
         pool: PgPool,
         name: &str,
-        records: HashMap<String, Vec<Vec<String>>>,
+        records: PreconfiguredRecords,
     ) -> Box<DatabaseAuthority> {
         // todo: remove unwrap
         let lower = LowerName::from(Name::from_str(name).unwrap());
         // todo: remove unwrap
-        let records = parse(records).unwrap();
 
         let inner = DatabaseAuthorityInner {
             lower,
