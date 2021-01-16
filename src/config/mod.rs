@@ -12,8 +12,11 @@ mod records;
 
 #[derive(Deserialize, Debug)]
 pub struct Api {
+    #[serde(default, deserialize_with = "listener::deserialize")]
     pub http: Listener,
+    #[serde(default, deserialize_with = "listener::deserialize")]
     pub https: Listener,
+    #[serde(default, deserialize_with = "listener::deserialize")]
     pub prom: Listener,
 }
 

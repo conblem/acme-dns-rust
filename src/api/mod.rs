@@ -24,9 +24,9 @@ pub struct Api<H, P, S> {
 }
 
 pub async fn new(
-    Listener(http, http_proxy): Listener,
-    Listener(https, https_proxy): Listener,
-    Listener(prom, prom_proxy): Listener,
+    (http, http_proxy): Listener,
+    (https, https_proxy): Listener,
+    (prom, prom_proxy): Listener,
     pool: PgPool,
 ) -> Result<
     Api<
