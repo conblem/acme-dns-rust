@@ -1,8 +1,12 @@
+use acme_lib::order::NewOrder;
 use acme_lib::{create_p384_key, Directory, DirectoryUrl};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use sqlx::{Executor, FromRow, PgPool, Postgres};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::time::Interval;
+use tracing::{error, info, Instrument, Span};
 use uuid::Uuid;
 
 use crate::acme::DatabasePersist;
@@ -104,20 +108,21 @@ impl CertFacade {
                 Some(cert)
             }
             Some(mut cert) => {
-                // use constant variables
                 let now = to_i64(&now());
                 let one_hour_ago = now - HOUR as i64;
+                // longer ago than 1 hour so probably timed out
                 if cert.update < one_hour_ago {
                     cert.update = now;
                     cert.state = State::Updating;
                     CertFacade::update_cert(&mut transaction, &cert).await?;
                     Some(cert)
                 } else {
+                    info!("job still in progress");
                     None
                 }
             }
             None => {
-                let domain = Domain::default();
+                let domain = Domain::new()?;
                 let cert = Cert::new(&domain);
 
                 DomainFacade::create_domain(&mut transaction, &domain).await?;
@@ -126,7 +131,7 @@ impl CertFacade {
             }
         };
 
-        transaction.commit().await.unwrap();
+        transaction.commit().await?;
 
         Ok(cert)
     }
@@ -151,92 +156,128 @@ impl CertFacade {
 pub struct CertManager {
     pool: PgPool,
     directory: Directory<DatabasePersist>,
+    runtime: Arc<Runtime>,
 }
 
 impl CertManager {
-    pub async fn new(pool: PgPool, persist: DatabasePersist, acme: String) -> Result<Self> {
+    #[tracing::instrument(name = "CertManager::new", skip(pool, persist))]
+    pub async fn new(
+        pool: PgPool,
+        persist: DatabasePersist,
+        acme: String,
+        runtime: &Arc<Runtime>,
+    ) -> Result<Self> {
+        let span = Span::current();
         let directory = tokio::task::spawn_blocking(move || {
+            let _enter = span.enter();
             Directory::from_url(persist, DirectoryUrl::Other(&acme))
         })
         .await??;
 
-        Ok(CertManager { pool, directory })
+        Ok(CertManager {
+            pool,
+            directory,
+            runtime: Arc::clone(runtime),
+        })
     }
 
     // maybe useless function
     fn interval() -> Interval {
         // use constant
-        tokio::time::interval(Duration::from_secs(3600))
+        tokio::time::interval(Duration::from_secs(HOUR))
     }
 
+    #[tracing::instrument(name = "CertManager::spawn", skip(self))]
     pub async fn spawn(self) -> Result<()> {
-        tokio::spawn(async move {
-            let mut interval = CertManager::interval();
-            loop {
-                interval.tick().await;
-                if true {
-                    continue;
+        tokio::spawn(
+            async move {
+                let mut interval = CertManager::interval();
+                loop {
+                    interval.tick().await;
+                    info!("Started Interval");
+                    if false {
+                        info!("Skipping Interval");
+                        continue;
+                    }
+                    if let Err(e) = self.manage().await {
+                        error!("{}", e);
+                        continue;
+                    }
+                    info!("Interval successfully passed");
                 }
-                if let Err(e) = self.test().await {
-                    log::error!("{}", e);
-                    continue;
-                }
-                log::info!("Interval successfully passed");
             }
-        })
+            .in_current_span(),
+        )
         .await?;
 
         Ok(())
     }
 
-    async fn test(&self) -> Result<()> {
+    async fn manage(&self) -> Result<()> {
         // maybe context is not needed here
-        let mut memory_cert = CertFacade::start(&self.pool)
-            .await
-            .context("Start failed")?
-            .ok_or_else(|| anyhow!("Start did not return cert"))?;
+        let memory_cert = match CertFacade::start(&self.pool).await? {
+            Some(memory_cert) => memory_cert,
+            None => return Ok(()),
+        };
 
-        // todo: improve
-        let mut domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
+        let domain = DomainFacade::find_by_id(&self.pool, &memory_cert.domain)
             .await?
-            .expect("must have in sql");
+            .ok_or_else(|| anyhow!("Could not find domain: {}", &memory_cert.domain))?;
 
         let directory = self.directory.clone();
-        let mut order = tokio::task::spawn_blocking(move || {
-            let account = directory.account("acme-dns-rust@byom.de")?;
-            account.new_order("acme.wehrli.ml", &[])
-        })
-        .await??;
+        let pool = self.pool.clone();
+        let runtime = Arc::clone(&self.runtime);
 
-        let mut auths = order.authorizations()?;
-        let call = auths
-            .pop()
-            .ok_or_else(|| anyhow!("couldn't unpack auths"))?
-            .dns_challenge();
-        let proof = call.dns_proof();
-
-        domain.txt = Some(proof);
-        DomainFacade::update_domain(&self.pool, &domain).await?;
-
-        //error handling
+        let span = Span::current();
         let cert = tokio::task::spawn_blocking(move || {
-            call.validate(5000)?;
-            order.refresh()?;
-            // fix
-            let ord_csr = order.confirm_validations().unwrap();
-            let private = create_p384_key();
-            let ord_crt = ord_csr.finalize_pkey(private, 5000)?;
-            ord_crt.download_and_save_cert()
+            let _span = span.enter();
+            let account = directory.account("acme-dns-rust@byom.de")?;
+            let order = account.new_order("acme.conblem.me", &[])?;
+            CertManager::validate(memory_cert, domain, order, &pool, &runtime)
         })
         .await??;
+
+        CertFacade::stop(&self.pool, cert).await?;
+
+        Ok(())
+    }
+
+    fn validate(
+        mut memory_cert: Cert,
+        mut domain: Domain,
+        mut order: NewOrder<DatabasePersist>,
+        pool: &PgPool,
+        runtime: &Runtime,
+    ) -> Result<Cert> {
+        let ord_csr = loop {
+            if let Some(ord_csr) = order.confirm_validations() {
+                break ord_csr;
+            }
+
+            let chall = order
+                .authorizations()?
+                .get(0)
+                .ok_or_else(|| anyhow!("couldn't unpack auths"))?
+                .dns_challenge();
+
+            domain.txt = Some(chall.dns_proof());
+            let update = DomainFacade::update_domain(pool, &domain);
+            runtime.block_on(update.in_current_span())?;
+
+            chall.validate(5000)?;
+            order.refresh()?;
+        };
+
+        let private = create_p384_key();
+        let ord_crt = ord_csr.finalize_pkey(private, 5000)?;
+        let cert = ord_crt.download_and_save_cert()?;
 
         let private = cert.private_key().to_string();
         let cert = cert.certificate().to_string();
 
-        memory_cert.cert = Some(cert);
         memory_cert.private = Some(private);
-        CertFacade::stop(&self.pool, memory_cert).await?;
+        memory_cert.cert = Some(cert);
 
-        Ok(())
+        Ok(memory_cert)
     }
 }

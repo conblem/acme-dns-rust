@@ -9,24 +9,36 @@ categories = ["command-line-utilities"]
 repository = "https://github.com/conblem/acme-dns-rust/"
 description = "Acme DNS implementation written in Rust"
 
+[[bin]]
+name = "acme-dns-rust"
+path = "src/main.rs"
+
 [dependencies]
-log = "0.4"
-sqlx = { version = "0.4.0-beta.1", default-features = false, features = [ "runtime-tokio", "macros", "migrate"] }
-tokio = { version = "0.2", features = ["dns", "tcp", "udp"] }
+hyper = { version = "0.14", features = ["stream", "http1", "http2", "server", "runtime"] }
+lazy_static = "1.4"
+prometheus = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
+tracing-futures = { version = "0.2", features = ["futures-03"] }
+#sqlx = { version = "0.4.1", default-features = false, features = [ "runtime-tokio-rustls", "macros", "migrate"] }
+sqlx = { version = "0.4.2", git = "https://github.com/lumeohq/sqlx", branch = "tokio-1.0", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "net", "signal", "macros"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-rustls = "0.22"
 uuid = { version = "0.8", features = ["v4"] }
-simplelog = "0.8"
-bcrypt = "0.8"
-warp = { version = "0.2", default-features = false }
+bcrypt = "0.9"
+#warp = { version = "0.2.5", default-features = false }
+warp = { version = "0.2.5", git = "https://github.com/aknuds1/warp", branch = "chore/upgrade-tokio", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 acme-lib = "0.8"
-trust-dns-server = "0.19"
-trust-dns-client = "0.19"
+trust-dns-server = "0.20"
+trust-dns-client = "0.20"
 parking_lot = "0.11"
 futures-util = "0.3"
-rustls = "0.18"
-tokio-rustls = "0.14"
+rustls = "0.19"
 toml = "0.5"
 anyhow = "1.0"
+ppp = "1.2"
 
 [features]
 default = ["postgres"]
