@@ -18,9 +18,9 @@ use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
 
 use crate::cert::CertFacade;
+use crate::config::PreconfiguredRecords;
 use crate::domain::{Domain, DomainFacade};
 use crate::util::error;
-use crate::config::PreconfiguredRecords;
 
 pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
 
@@ -32,11 +32,7 @@ struct DatabaseAuthorityInner {
 }
 
 impl DatabaseAuthority {
-    pub fn new(
-        pool: PgPool,
-        name: &str,
-        records: PreconfiguredRecords,
-    ) -> Box<DatabaseAuthority> {
+    pub fn new(pool: PgPool, name: &str, records: PreconfiguredRecords) -> Box<DatabaseAuthority> {
         // todo: remove unwrap
         let lower = LowerName::from(Name::from_str(name).unwrap());
         // todo: remove unwrap

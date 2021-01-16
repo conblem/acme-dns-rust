@@ -34,7 +34,7 @@ pub struct General {
 pub struct Config {
     pub general: General,
     pub api: Api,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "records::deserialize")]
     pub records: PreconfiguredRecords,
 }
 

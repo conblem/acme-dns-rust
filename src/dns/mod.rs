@@ -9,10 +9,9 @@ use trust_dns_server::ServerFuture;
 
 mod authority;
 mod handler;
-mod parse;
 
-pub use self::authority::DatabaseAuthority;
-use crate::dns::handler::TraceRequestHandler;
+pub use authority::DatabaseAuthority;
+use handler::TraceRequestHandler;
 
 pub struct DNS<A> {
     server: ServerFuture<TraceRequestHandler>,
