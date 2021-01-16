@@ -68,7 +68,7 @@ where
     pub async fn spawn(self) -> Result<()> {
         info!("Starting API spawn");
 
-        let routes = routes::routes(self.pool.clone());
+        let routes = routes::routes(self.pool);
 
         let http = self
             .http

@@ -44,10 +44,7 @@ where
         where
             E: serde::de::Error,
         {
-            Ok((
-                String::from(value).into(),
-                ProxyProtocol::Disabled,
-            ))
+            Ok((String::from(value).into(), ProxyProtocol::Disabled))
         }
 
         fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
