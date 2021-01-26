@@ -3,7 +3,7 @@ use futures_util::TryStreamExt;
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
-use std::io::{Cursor, IoSlice, Write};
+use std::io::IoSlice;
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
@@ -43,7 +43,7 @@ pub(super) fn wrap(
         .try_buffer_unordered(100)
 }
 
-pub(super) trait ToProxyStream: Sized {
+pub(super) trait ToProxyStream {
     fn source(self, proxy: ProxyProtocol) -> ProxyStream;
 }
 
@@ -63,13 +63,13 @@ impl ToProxyStream for TcpStream {
 
 pub(super) struct ProxyStream {
     stream: TcpStream,
-    data: Option<Cursor<Vec<u8>>>,
+    data: Option<Vec<u8>>,
     start_of_data: usize,
 }
 
 impl ProxyStream {
     fn proxy_peer(&mut self) -> PeerAddrFuture<'_> {
-        PeerAddrFuture::new(self)
+        PeerAddrFuture { stream: self }
     }
 }
 
@@ -81,7 +81,7 @@ impl AsyncRead for ProxyStream {
     ) -> Poll<IoResult<()>> {
         let this = self.get_mut();
         if let Some(data) = this.data.take() {
-            buf.put_slice(&data.get_ref()[this.start_of_data..])
+            buf.put_slice(&data[this.start_of_data..])
         }
         Pin::new(&mut this.stream).poll_read(cx, buf)
     }
@@ -122,30 +122,7 @@ struct PeerAddrFuture<'a> {
 }
 
 impl<'a> PeerAddrFuture<'a> {
-    fn new(stream: &'a mut ProxyStream) -> Self {
-        PeerAddrFuture { stream }
-    }
-
-    fn parse_header(&mut self) -> Poll<IoResult<Header>> {
-        let data = match self.stream.data {
-            Some(ref mut data) => data.get_ref(),
-            None => unreachable!("Future cannot be pulled anymore"),
-        };
-
-        match ppp::parse_header(data) {
-            Err(ParseError::Incomplete) => Poll::Pending,
-            Err(ParseError::Failure) => Poll::Ready(Err(IoError::new(
-                ErrorKind::InvalidData,
-                "Proxy Parser Error",
-            ))),
-            Ok((remaining, res)) => {
-                self.stream.start_of_data = data.len() - remaining.len();
-                Poll::Ready(Ok(res))
-            }
-        }
-    }
-
-    fn format_header(res: Header) -> Poll<<Self as Future>::Output> {
+    fn format_header(&self, res: Header) -> Poll<<Self as Future>::Output> {
         let addr = match res.addresses {
             Addresses::IPv4 {
                 source_address,
@@ -175,17 +152,30 @@ impl<'a> PeerAddrFuture<'a> {
     }
 
     fn get_header(&mut self) -> Poll<<Self as Future>::Output> {
-        let res = match self.parse_header() {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Ready(Ok(res)) => res,
+        let data = match self.stream.data {
+            Some(ref mut data) => data,
+            None => unreachable!("Future cannot be pulled anymore"),
         };
 
-        PeerAddrFuture::format_header(res)
+        let res = match ppp::parse_header(data) {
+            Err(ParseError::Incomplete) => return Poll::Pending,
+            Err(ParseError::Failure) => {
+                return Poll::Ready(Err(IoError::new(
+                    ErrorKind::InvalidData,
+                    "Proxy Parser Error",
+                )))
+            }
+            Ok((remaining, res)) => {
+                self.stream.start_of_data = data.len() - remaining.len();
+                res
+            }
+        };
+
+        self.format_header(res)
     }
 }
 
-impl<'a> Future for PeerAddrFuture<'a> {
+impl Future for PeerAddrFuture<'_> {
     type Output = IoResult<SocketAddr>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -207,9 +197,7 @@ impl<'a> Future for PeerAddrFuture<'a> {
             Poll::Pending => return Poll::Pending,
         };
 
-        if let Err(e) = data.write_all(buf) {
-            return Poll::Ready(Err(e));
-        }
+        data.extend_from_slice(buf);
 
         this.get_header()
     }

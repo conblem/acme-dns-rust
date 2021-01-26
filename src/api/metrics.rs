@@ -159,8 +159,7 @@ fn metrics_handler() -> HttpResult<Response<String>> {
         Err(e) => return internal_server_error_and_trace(&e),
     };
 
-    Response::builder()
-        .body(res)
+    Ok(Response::new(res))
 }
 
 const METRICS_PATH: &str = "metrics";

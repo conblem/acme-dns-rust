@@ -1,6 +1,6 @@
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer};
-use trust_dns_server::resolver::config::{ResolverConfig, NameServerConfigGroup};
+use trust_dns_server::resolver::config::{NameServerConfigGroup, ResolverConfig};
 
 pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Option<ResolverConfig>, D::Error>
 where
@@ -15,7 +15,7 @@ where
         Some(res) => {
             let ip = res.parse().map_err(DeError::custom)?;
             NameServerConfigGroup::from_ips_clear(&[ip], 53, false)
-        },
+        }
         None => return Ok(None),
     };
 
