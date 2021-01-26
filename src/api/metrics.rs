@@ -1,20 +1,16 @@
-use futures_util::stream;
-use hyper::Body;
 use lazy_static::lazy_static;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
     IntCounterVec, TextEncoder,
 };
-use std::io::{BufRead, Cursor};
+use std::fmt::Display;
+use std::io::{BufRead, Error as IoError};
 use tracing::{debug, error};
 use warp::filters::trace;
-use warp::http::header::{HeaderValue, CONTENT_TYPE};
-use warp::http::{Method, Response, StatusCode};
+use warp::http::{Method, Response, Result as HttpResult, StatusCode};
 use warp::path::FullPath;
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
-
-use self::MetricsConfig::{Borrowed, Owned};
 
 lazy_static! {
     static ref HTTP_STATUS_COUNTER: IntCounterVec = register_int_counter_vec!(
@@ -39,15 +35,15 @@ enum MetricsConfig {
 impl MetricsConfig {
     fn new(config: &'static str, path: FullPath) -> MetricsConfig {
         match config {
-            "" => Owned(path),
-            config => Borrowed(config),
+            "" => Self::Owned(path),
+            config => Self::Borrowed(config),
         }
     }
 
     fn as_str(&self) -> &str {
-        match &self {
-            Borrowed(config) => config,
-            Owned(path) => path.as_str(),
+        match self {
+            Self::Borrowed(config) => config,
+            Self::Owned(path) => path.as_str(),
         }
     }
 }
@@ -74,11 +70,11 @@ where
     type Output = O;
 }
 
-fn stop_metrics(
+fn stop_metrics<R: Reply>(
     config: MetricsConfig,
     method: Method,
     mut timer: HistogramTimerWrapper,
-    res: impl Reply,
+    res: R,
 ) -> WarpResponse {
     let res = res.into_response();
 
@@ -126,32 +122,45 @@ where
     }
 }
 
-const TEXT_PLAIN_MIME: &str = "text/plain";
+fn internal_server_error_and_trace<E: Display>(error: &E) -> HttpResult<Response<String>> {
+    error!("{}", error);
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(error.to_string())
+}
+
+fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
+    let mut res = String::with_capacity(data.len());
+    loop {
+        let len = match data.read_line(&mut res) {
+            Ok(0) => break Ok(res),
+            Ok(len) => len,
+            Err(e) => break Err(e),
+        };
+        if res.ends_with(" 0\n") {
+            res.truncate(res.len() - len);
+        }
+    }
+}
 
 // maybe this implementation is wrong as it removes bucket items aswell
-fn metrics_handler() -> impl Reply {
+// this method leaks internal errors so it should not be public
+fn metrics_handler() -> HttpResult<Response<String>> {
     let encoder = TextEncoder::new();
     let families = prometheus::gather();
+
     let mut res = vec![];
     if let Err(e) = encoder.encode(&families, &mut res) {
-        error!("{}", e);
-        return Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(e.to_string())
-            .into_response();
+        return internal_server_error_and_trace(&e);
     }
 
-    // we keep the error in the stream so it can later be handled by warp
-    let stream = Cursor::new(res).lines().filter_map(|line| match line {
-        Ok(line) if !line.ends_with(" 0") => Some(Ok(line + "\n")),
-        Err(error) => Some(Err(error)),
-        _ => None,
-    });
+    let res = match remove_zero_metrics(&res[..]) {
+        Ok(res) => res,
+        Err(e) => return internal_server_error_and_trace(&e),
+    };
 
     Response::builder()
-        .header(CONTENT_TYPE, HeaderValue::from_static(TEXT_PLAIN_MIME))
-        .body(Body::wrap_stream(stream::iter(stream)))
-        .into_response()
+        .body(res)
 }
 
 const METRICS_PATH: &str = "metrics";
