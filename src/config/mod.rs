@@ -6,7 +6,9 @@ use tracing::{debug, info, info_span};
 
 pub use listener::{Listener, ProxyProtocol};
 pub use records::PreconfiguredRecords;
+use trust_dns_server::resolver::config::ResolverConfig;
 
+mod dns;
 mod listener;
 mod records;
 
@@ -26,6 +28,8 @@ fn default_acme() -> String {
 
 #[derive(Deserialize, Debug)]
 pub struct General {
+    #[serde(default, deserialize_with = "dns::deserialize")]
+    pub test: Option<ResolverConfig>,
     pub dns: String,
     pub db: String,
     #[serde(default = "default_acme")]

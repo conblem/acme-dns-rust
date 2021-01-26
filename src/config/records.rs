@@ -66,7 +66,7 @@ impl<'de> DeserializeSeed<'de> for RecordDataSeed {
                 A: MapAccess<'de>,
             {
                 let name = self.0;
-                let mut res = HashMap::new();
+                let mut res = HashMap::with_capacity(map.size_hint().unwrap_or_default());
                 while let Some(record_type) = map.next_key::<&str>()? {
                     let record_type = match record_type {
                         "TXT" => RecordType::TXT,

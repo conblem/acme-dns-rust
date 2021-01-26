@@ -6,8 +6,8 @@ use std::future::Future;
 use tracing::field::Empty;
 use tracing::instrument::Instrumented;
 use tracing::{info_span, Instrument, Span};
-use trust_dns_client::op::LowerQuery;
 use trust_dns_server::authority::Catalog;
+use trust_dns_server::client::op::LowerQuery;
 use trust_dns_server::server::{Request, RequestHandler, ResponseHandler};
 
 lazy_static! {

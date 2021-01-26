@@ -6,16 +6,16 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
 use tracing::{debug, error, info, Instrument, Span};
-use trust_dns_client::op::LowerQuery;
-use trust_dns_client::rr::{LowerName, Name};
 use trust_dns_server::authority::{
     AuthorityObject, BoxedLookupFuture, LookupObject, LookupRecords, MessageRequest, UpdateResult,
     ZoneType,
 };
+use trust_dns_server::client::op::LowerQuery;
+use trust_dns_server::client::rr::LowerName;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
-use trust_dns_server::proto::rr::{Record, RecordSet, RecordType};
+use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
 
 use crate::cert::CertFacade;
 use crate::config::PreconfiguredRecords;

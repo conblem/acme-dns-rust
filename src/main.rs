@@ -11,7 +11,6 @@ use tokio::signal::ctrl_c;
 use tracing::{debug, error, info, Instrument};
 
 use acme::DatabasePersist;
-use api::Api;
 use cert::CertManager;
 use dns::{DatabaseAuthority, DNS};
 
@@ -57,8 +56,7 @@ fn run() -> Result<()> {
             api.https.clone(),
             api.prom.clone(),
             pool.clone(),
-        )
-        .and_then(Api::spawn);
+        );
 
         let persist = DatabasePersist::new(pool.clone(), &runtime);
         let cert_manager = CertManager::new(pool, persist, config.general.acme, &runtime)
