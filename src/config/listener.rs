@@ -14,15 +14,15 @@ impl<'de> Deserialize<'de> for ProxyProtocol {
         D: Deserializer<'de>,
     {
         match bool::deserialize(deserializer)? {
-            true => Ok(ProxyProtocol::Enabled),
-            false => Ok(ProxyProtocol::Disabled),
+            true => Ok(Self::Enabled),
+            false => Ok(Self::Disabled),
         }
     }
 }
 
 impl Default for ProxyProtocol {
     fn default() -> Self {
-        ProxyProtocol::Disabled
+        Self::Disabled
     }
 }
 

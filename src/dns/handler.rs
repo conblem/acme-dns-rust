@@ -1,8 +1,10 @@
 use futures_util::future::{Join, Map, Ready};
 use futures_util::FutureExt;
 use lazy_static::lazy_static;
-use prometheus::{register_histogram_vec, HistogramTimer, HistogramVec};
+use prometheus::{register_histogram_vec, Histogram, HistogramTimer, HistogramVec};
 use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tracing::field::Empty;
 use tracing::instrument::Instrumented;
 use tracing::{info_span, Instrument, Span};
@@ -24,8 +26,10 @@ type ResponseFutureOutput = <ResponseFuture as Future>::Output;
 
 type MapFn = fn((ResponseFutureOutput, HistogramTimer));
 
-type JoinedFuture = Join<ResponseFuture, Ready<HistogramTimer>>;
-type MappedFuture = Map<Instrumented<JoinedFuture>, MapFn>;
+type StartTimer = fn(Histogram) -> HistogramTimer;
+// change type as join could maybe not start both futures
+type JoinedFuture = Join<ResponseFuture, Lazy<Histogram, StartTimer>>;
+type MappedFuture = Instrumented<Map<JoinedFuture, MapFn>>;
 
 pub(super) struct TraceRequestHandler {
     catalog: Catalog,
@@ -66,18 +70,53 @@ impl RequestHandler for TraceRequestHandler {
         let addr = request.src;
         let span = info_span!(parent: &self.span, "request", remote.addr = %addr, name = Empty, query_type = Empty);
 
-        let timer =
-            futures_util::future::ready(DNS_REQ_HISTOGRAM.with_label_values(name).start_timer());
+        let timer = DNS_REQ_HISTOGRAM.with_label_values(name);
+        let timer = Lazy::new(timer, start_timer);
         let handle_request = self.catalog.handle_request(request, response_handle);
 
         futures_util::future::join(handle_request, timer)
-            .instrument(span)
             .map(end_timer)
+            .instrument(span)
     }
+}
+
+fn start_timer(timer: Histogram) -> HistogramTimer {
+    timer.start_timer()
 }
 
 fn end_timer((res, timer): (ResponseFutureOutput, HistogramTimer)) {
     timer.observe_duration();
 
     res
+}
+
+// todo: lazy is not needed should be possible with map and then
+struct Lazy<T, F> {
+    data: Option<T>,
+    fun: Option<F>,
+}
+
+impl<T, F> Lazy<T, F> {
+    fn new(data: T, fun: F) -> Self {
+        Lazy {
+            data: Some(data),
+            fun: Some(fun),
+        }
+    }
+}
+
+impl<T, F, R> Future for Lazy<T, F>
+where
+    T: Unpin,
+    F: FnOnce(T) -> R + Unpin,
+{
+    type Output = R;
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let fun = this.fun.take().expect("Polled after completion");
+        let data = this.data.take().expect("Polled after completion");
+
+        Poll::Ready(fun(data))
+    }
 }

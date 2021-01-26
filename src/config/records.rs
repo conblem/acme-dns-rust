@@ -27,11 +27,7 @@ where
         {
             let mut res = HashMap::new();
             while let Some(key) = map.next_key::<&str>()? {
-                let name = match Name::from_str(key) {
-                    Err(e) => return Err(DeError::custom(e)),
-                    Ok(name) => name,
-                };
-
+                let name = Name::from_str(key).map_err(DeError::custom)?;
                 let (record_type, record_set) = map.next_value_seed(RecordDataSeed(name))?;
 
                 res.insert(record_type, record_set);
