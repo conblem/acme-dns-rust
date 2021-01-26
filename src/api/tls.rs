@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Error, Result};
 use futures_util::stream::{repeat, Stream};
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::{StreamExt, TryStreamExt, TryFutureExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
 use tokio_rustls::TlsAcceptor;
@@ -14,10 +15,13 @@ use super::proxy::ProxyStream;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
 
-pub(super) fn wrap(
-    listener: impl Stream<Item = IoResult<ProxyStream>> + Send,
+pub(super) fn wrap<L, I>(
+    listener: L,
     pool: PgPool,
 ) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
+where
+    L: Stream<Item = IoResult<I>> + Send,
+    I: Future<Output = IoResult<ProxyStream>> + Send,
 {
     let acceptor = Acceptor::new(pool);
 
@@ -26,13 +30,12 @@ pub(super) fn wrap(
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
         .map_ok(|(conn, acceptor)| async move {
-            let tls = acceptor.load_cert().await?;
+            let (conn, tls) = tokio::try_join!(conn.err_into(), acceptor.load_cert())?;
             Ok(tls.accept(conn).await?)
         })
         .try_buffer_unordered(100)
         .inspect_err(|err| error!("Stream error: {:?}", err))
         .filter(|stream| futures_util::future::ready(stream.is_ok()))
-        .into_stream()
 }
 
 struct Acceptor {

@@ -19,7 +19,7 @@ use crate::config::ProxyProtocol;
 pub(super) fn wrap(
     listener: TcpListener,
     proxy: ProxyProtocol,
-) -> impl Stream<Item = IoResult<ProxyStream>> + Send {
+) -> impl Stream<Item = IoResult<impl Future<Output = IoResult<ProxyStream>>>> + Send {
     TcpListenerStream::new(listener)
         .map_ok(move |stream| stream.source(proxy))
         .map_ok(|mut conn| {
@@ -40,7 +40,6 @@ pub(super) fn wrap(
             }
             .instrument(span)
         })
-        .try_buffer_unordered(100)
 }
 
 pub(super) trait ToProxyStream {

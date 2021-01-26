@@ -1,6 +1,6 @@
 use anyhow::Result;
 use futures_util::future::OptionFuture;
-use futures_util::FutureExt;
+use futures_util::{FutureExt, TryStreamExt};
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
@@ -28,12 +28,12 @@ pub async fn new(
     let routes = routes::routes(pool.clone());
 
     let http = http
-        .map(move |http| proxy::wrap(http, http_proxy))
+        .map(move |http| proxy::wrap(http, http_proxy).try_buffer_unordered(100))
         .map(|http| warp::serve(routes.clone()).serve_incoming(http))
         .map(tokio::spawn);
 
     let prom = prom
-        .map(move |prom| proxy::wrap(prom, prom_proxy))
+        .map(move |prom| proxy::wrap(prom, prom_proxy).try_buffer_unordered(100))
         .map(|prom| warp::serve(metrics()).serve_incoming(prom))
         .map(tokio::spawn);
 
