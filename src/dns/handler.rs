@@ -1,4 +1,4 @@
-use futures_util::future::{Join, Map, Ready};
+use futures_util::future::{Join, Map};
 use futures_util::FutureExt;
 use lazy_static::lazy_static;
 use prometheus::{register_histogram_vec, Histogram, HistogramTimer, HistogramVec};
@@ -24,12 +24,11 @@ lazy_static! {
 type ResponseFuture = <Catalog as RequestHandler>::ResponseFuture;
 type ResponseFutureOutput = <ResponseFuture as Future>::Output;
 
-type MapFn = fn((ResponseFutureOutput, HistogramTimer));
+type EndTimer = fn((ResponseFutureOutput, HistogramTimer)) -> ResponseFutureOutput;
 
 type StartTimer = fn(Histogram) -> HistogramTimer;
-// change type as join could maybe not start both futures
 type JoinedFuture = Join<ResponseFuture, Lazy<Histogram, StartTimer>>;
-type MappedFuture = Instrumented<Map<JoinedFuture, MapFn>>;
+type MappedFuture = Instrumented<Map<JoinedFuture, EndTimer>>;
 
 pub(super) struct TraceRequestHandler {
     catalog: Catalog,
@@ -71,11 +70,11 @@ impl RequestHandler for TraceRequestHandler {
         let span = info_span!(parent: &self.span, "request", remote.addr = %addr, name = Empty, query_type = Empty);
 
         let timer = DNS_REQ_HISTOGRAM.with_label_values(name);
-        let timer = Lazy::new(timer, start_timer);
+        let timer = Lazy::new(timer, start_timer as StartTimer);
         let handle_request = self.catalog.handle_request(request, response_handle);
 
         futures_util::future::join(handle_request, timer)
-            .map(end_timer)
+            .map(end_timer as EndTimer)
             .instrument(span)
     }
 }
@@ -84,14 +83,13 @@ fn start_timer(timer: Histogram) -> HistogramTimer {
     timer.start_timer()
 }
 
-fn end_timer((res, timer): (ResponseFutureOutput, HistogramTimer)) {
+fn end_timer((res, timer): (ResponseFutureOutput, HistogramTimer)) -> ResponseFutureOutput {
     timer.observe_duration();
 
     res
 }
 
-// todo: lazy is not needed should be possible with map and then
-struct Lazy<T, F> {
+pub struct Lazy<T, F> {
     data: Option<T>,
     fun: Option<F>,
 }
