@@ -1,18 +1,17 @@
 use futures_util::stream::Stream;
-use futures_util::TryStreamExt;
+use futures_util::{TryStreamExt, FutureExt};
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
 use std::io::IoSlice;
-use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
+use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult, AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::field::{display, Empty};
-use tracing::{debug_span, error, info, Instrument, Span};
+use tracing::{debug_span, error, info, Instrument};
 
 use crate::config::ProxyProtocol;
 
@@ -24,8 +23,8 @@ pub(super) fn wrap(
         .map_ok(move |stream| stream.source(proxy))
         .map_ok(|mut conn| {
             let span = debug_span!("ADDR", remote.addr = Empty);
+            let span_clone = span.clone();
             async move {
-                let span = Span::current();
                 match conn.proxy_peer().await {
                     Ok(addr) => {
                         span.record("remote.addr", &display(addr));
@@ -38,7 +37,7 @@ pub(super) fn wrap(
                 }
                 Ok(conn)
             }
-            .instrument(span)
+            .instrument(span_clone)
         })
 }
 
@@ -68,7 +67,7 @@ pub(super) struct ProxyStream {
 
 impl ProxyStream {
     fn proxy_peer(&mut self) -> PeerAddrFuture<'_> {
-        PeerAddrFuture { stream: self }
+        PeerAddrFuture { proxy_stream: self }
     }
 }
 
@@ -117,7 +116,7 @@ impl AsyncWrite for ProxyStream {
 }
 
 struct PeerAddrFuture<'a> {
-    stream: &'a mut ProxyStream,
+    proxy_stream: &'a mut ProxyStream,
 }
 
 impl<'a> PeerAddrFuture<'a> {
@@ -151,8 +150,8 @@ impl<'a> PeerAddrFuture<'a> {
     }
 
     fn get_header(&mut self) -> Poll<<Self as Future>::Output> {
-        let data = match self.stream.data {
-            Some(ref mut data) => data,
+        let data = match &mut self.proxy_stream.data {
+            Some(data) => data,
             None => unreachable!("Future cannot be pulled anymore"),
         };
 
@@ -165,7 +164,7 @@ impl<'a> PeerAddrFuture<'a> {
                 )))
             }
             Ok((remaining, res)) => {
-                self.stream.start_of_data = data.len() - remaining.len();
+                self.proxy_stream.start_of_data = data.len() - remaining.len();
                 res
             }
         };
@@ -179,24 +178,22 @@ impl Future for PeerAddrFuture<'_> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let stream = &mut this.stream;
+        let stream = &mut this.proxy_stream.stream;
+        let data = &mut this.proxy_stream.data;
 
-        let data = match &mut stream.data {
-            Some(ref mut data) => data,
-            None => return Poll::Ready(stream.stream.local_addr()),
+        let data = match data {
+            Some(data) => data,
+            None => return Poll::Ready(stream.local_addr()),
         };
 
-        let mut buf = [MaybeUninit::<u8>::uninit(); 256];
-        let mut buf = ReadBuf::uninit(&mut buf);
 
-        let stream = Pin::new(&mut stream.stream);
-        let buf = match stream.poll_read(cx, &mut buf) {
-            Poll::Ready(Ok(_)) => buf.filled(),
+        let stream = stream.read_buf(data);
+        tokio::pin!(stream);
+        match stream.poll_unpin(cx) {
+            Poll::Ready(Ok(_)) => {},
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Pending => return Poll::Pending,
         };
-
-        data.extend_from_slice(buf);
 
         this.get_header()
     }
