@@ -1,5 +1,5 @@
 use futures_util::stream::Stream;
-use futures_util::{TryStreamExt, FutureExt};
+use futures_util::TryStreamExt;
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
@@ -7,13 +7,14 @@ use std::io::IoSlice;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument};
 
 use crate::config::ProxyProtocol;
+use tokio_util::io::poll_read_buf;
 
 pub(super) fn wrap(
     listener: TcpListener,
@@ -178,19 +179,15 @@ impl Future for PeerAddrFuture<'_> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let stream = &mut this.proxy_stream.stream;
-        let data = &mut this.proxy_stream.data;
+        let stream = Pin::new(&mut this.proxy_stream.stream);
 
-        let data = match data {
+        let data = match &mut this.proxy_stream.data {
             Some(data) => data,
             None => return Poll::Ready(stream.local_addr()),
         };
 
-
-        let stream = stream.read_buf(data);
-        tokio::pin!(stream);
-        match stream.poll_unpin(cx) {
-            Poll::Ready(Ok(_)) => {},
+        match poll_read_buf(stream, cx, data) {
+            Poll::Ready(Ok(_)) => {}
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Pending => return Poll::Pending,
         };
