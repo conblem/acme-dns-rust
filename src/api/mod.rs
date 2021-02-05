@@ -5,15 +5,15 @@ use futures_util::{FutureExt, StreamExt};
 use hyper::server::conn::Http;
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
+use std::fmt::Display;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tracing::{error, info, info_span, Instrument};
 use tracing::field::Empty;
+use tracing::{error, info, info_span, Instrument};
 use warp::{Filter, Rejection, Reply};
 
 use crate::config::Listener;
-use std::fmt::Display;
 
 mod metrics;
 mod proxy;
@@ -33,7 +33,7 @@ where
     let http = Arc::new(Http::new());
 
     loop {
-        let span = info_span!("conn", local.addr = Empty, remote.addr = Empty, remote.real = Empty);
+        let span = info_span!("conn", remote.addr = Empty, remote.real = Empty);
         let conn = match io.next().instrument(span.clone()).await {
             Some(Ok(conn)) => conn,
             Some(Err(err)) => {

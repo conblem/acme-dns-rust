@@ -11,8 +11,8 @@ use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Res
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::io::poll_read_buf;
-use tracing::field::{display, Empty};
-use tracing::{debug_span, error, info, Instrument, Span};
+use tracing::field::{debug, display};
+use tracing::{error, Instrument, Span};
 
 use crate::config::ProxyProtocol;
 
@@ -23,20 +23,18 @@ pub(super) fn wrap(
     TcpListenerStream::new(listener)
         .map_ok(move |stream| {
             let span = Span::current();
-            span.record("remote.addr", &display(stream.peer_addr()));
-            span.record("local.addr", &display(stream.local_addr()));
+            span.record("remote.addr", &debug(stream.peer_addr()));
             (stream.source(proxy), span)
         })
         .map_ok(|(mut conn, span)| {
             let span_clone = span.clone();
             async move {
                 match conn.proxy_peer().await {
-                    Ok(addr) => {
+                    Ok(Some(addr)) => {
                         span.record("remote.real", &display(addr));
-                        info!("Got addr {}", addr)
                     }
+                    Ok(None) => {}
                     Err(e) => {
-                        span.record("remote.real", &"Unknown");
                         error!("Could net get remote.addr: {}", e);
                     }
                 }
@@ -151,7 +149,7 @@ impl<'a> PeerAddrFuture<'a> {
             }
         };
 
-        Poll::Ready(Ok(addr))
+        Poll::Ready(Ok(Some(addr)))
     }
 
     fn get_header(&mut self) -> Poll<<Self as Future>::Output> {
@@ -179,7 +177,7 @@ impl<'a> PeerAddrFuture<'a> {
 }
 
 impl Future for PeerAddrFuture<'_> {
-    type Output = IoResult<SocketAddr>;
+    type Output = IoResult<Option<SocketAddr>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -187,7 +185,7 @@ impl Future for PeerAddrFuture<'_> {
 
         let data = match &mut this.proxy_stream.data {
             Some(data) => data,
-            None => return Poll::Ready(stream.local_addr()),
+            None => return Poll::Ready(Ok(None)),
         };
 
         match ready!(poll_read_buf(stream, cx, data)) {
