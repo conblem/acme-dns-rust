@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tracing::{error, info, info_span, Instrument};
+use tracing::field::Empty;
 use warp::{Filter, Rejection, Reply};
 
 use crate::config::Listener;
@@ -32,7 +33,7 @@ where
     let http = Arc::new(Http::new());
 
     loop {
-        let span = info_span!("TCP");
+        let span = info_span!("conn", local.addr = Empty, remote.addr = Empty, remote.real = Empty);
         let conn = match io.next().instrument(span.clone()).await {
             Some(Ok(conn)) => conn,
             Some(Err(err)) => {

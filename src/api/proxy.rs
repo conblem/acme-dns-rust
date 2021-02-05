@@ -23,20 +23,20 @@ pub(super) fn wrap(
     TcpListenerStream::new(listener)
         .map_ok(move |stream| {
             let span = Span::current();
-            span.record_all()
-            stream.source(proxy)
+            span.record("remote.addr", &display(stream.peer_addr()));
+            span.record("local.addr", &display(stream.local_addr()));
+            (stream.source(proxy), span)
         })
-        .map_ok(|mut conn| {
-            let span = debug_span!("ADDR", remote.addr = Empty);
+        .map_ok(|(mut conn, span)| {
             let span_clone = span.clone();
             async move {
                 match conn.proxy_peer().await {
                     Ok(addr) => {
-                        span.record("remote.addr", &display(addr));
+                        span.record("remote.real", &display(addr));
                         info!("Got addr {}", addr)
                     }
                     Err(e) => {
-                        span.record("remote.addr", &"Unknown");
+                        span.record("remote.real", &"Unknown");
                         error!("Could net get remote.addr: {}", e);
                     }
                 }
