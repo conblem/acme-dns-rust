@@ -1,5 +1,5 @@
 use futures_util::stream::Stream;
-use futures_util::TryStreamExt;
+use futures_util::{ready, TryStreamExt};
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
@@ -186,10 +186,9 @@ impl Future for PeerAddrFuture<'_> {
             None => return Poll::Ready(stream.local_addr()),
         };
 
-        match poll_read_buf(stream, cx, data) {
-            Poll::Ready(Ok(_)) => {}
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Pending => return Poll::Pending,
+        match ready!(poll_read_buf(stream, cx, data)) {
+            Ok(_) => {}
+            Err(e) => return Poll::Ready(Err(e)),
         };
 
         this.get_header()

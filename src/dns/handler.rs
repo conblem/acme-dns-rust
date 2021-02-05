@@ -1,10 +1,8 @@
-use futures_util::future::{Join, Map};
-use futures_util::FutureExt;
+use futures_util::future::{Join, Map, Ready};
+use futures_util::{future, FutureExt};
 use lazy_static::lazy_static;
-use prometheus::{register_histogram_vec, Histogram, HistogramTimer, HistogramVec};
+use prometheus::{register_histogram_vec, HistogramTimer, HistogramVec};
 use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use tracing::field::Empty;
 use tracing::instrument::Instrumented;
 use tracing::{info_span, Instrument, Span};
@@ -26,8 +24,7 @@ type ResponseFutureOutput = <ResponseFuture as Future>::Output;
 
 type EndTimer = fn((ResponseFutureOutput, HistogramTimer)) -> ResponseFutureOutput;
 
-type StartTimer = fn(Histogram) -> HistogramTimer;
-type JoinedFuture = Join<ResponseFuture, Lazy<Histogram, StartTimer>>;
+type JoinedFuture = Join<ResponseFuture, Ready<HistogramTimer>>;
 type MappedFuture = Instrumented<Map<JoinedFuture, EndTimer>>;
 
 pub(super) struct TraceRequestHandler {
@@ -56,65 +53,30 @@ impl RequestHandler for TraceRequestHandler {
             .map(LowerQuery::name)
             .map(ToString::to_string);
 
-        let name = match name {
-            Some(ref name) => Some([name.as_str()]),
+        let name = match &name {
+            Some(name) => Some([name.as_str()]),
             None => None,
         };
 
-        let name = match name {
-            Some(ref name) => &name[..],
+        let name = match &name {
+            Some(name) => &name[..],
             None => &[],
         };
 
         let addr = request.src;
         let span = info_span!(parent: &self.span, "request", remote.addr = %addr, name = Empty, query_type = Empty);
 
-        let timer = DNS_REQ_HISTOGRAM.with_label_values(name);
-        let timer = Lazy::new(timer, start_timer as StartTimer);
+        let timer = DNS_REQ_HISTOGRAM.with_label_values(name).start_timer();
         let handle_request = self.catalog.handle_request(request, response_handle);
 
-        futures_util::future::join(handle_request, timer)
+        future::join(handle_request, future::ready(timer))
             .map(end_timer as EndTimer)
             .instrument(span)
     }
-}
-
-fn start_timer(timer: Histogram) -> HistogramTimer {
-    timer.start_timer()
 }
 
 fn end_timer((res, timer): (ResponseFutureOutput, HistogramTimer)) -> ResponseFutureOutput {
     timer.observe_duration();
 
     res
-}
-
-pub struct Lazy<T, F> {
-    data: Option<T>,
-    fun: Option<F>,
-}
-
-impl<T, F> Lazy<T, F> {
-    fn new(data: T, fun: F) -> Self {
-        Lazy {
-            data: Some(data),
-            fun: Some(fun),
-        }
-    }
-}
-
-impl<T, F, R> Future for Lazy<T, F>
-where
-    T: Unpin,
-    F: FnOnce(T) -> R + Unpin,
-{
-    type Output = R;
-
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        let fun = this.fun.take().expect("Polled after completion");
-        let data = this.data.take().expect("Polled after completion");
-
-        Poll::Ready(fun(data))
-    }
 }
