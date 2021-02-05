@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use futures_util::stream::{repeat, Stream};
 use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::RwLock;
@@ -18,7 +18,11 @@ use crate::util::to_u64;
 pub(super) fn wrap<L, I>(
     listener: L,
     pool: PgPool,
-) -> impl Stream<Item = Result<impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>>> + Send
+) -> impl Stream<
+    Item = Result<
+        impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>,
+    >,
+> + Send
 where
     L: Stream<Item = IoResult<I>> + Send,
     I: Future<Output = IoResult<ProxyStream>> + Send,

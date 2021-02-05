@@ -1,18 +1,18 @@
-use anyhow::{Result, Error};
-use futures_util::future::{OptionFuture, Future};
+use anyhow::Result;
+use futures_util::future::{Future, OptionFuture};
 use futures_util::stream::Stream;
-use futures_util::{FutureExt, StreamExt, TryStreamExt};
+use futures_util::{FutureExt, StreamExt};
 use hyper::server::conn::Http;
 use metrics::{metrics, metrics_wrapper};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tracing::{info, error, info_span, Instrument};
+use tracing::{error, info, info_span, Instrument};
 use warp::{Filter, Rejection, Reply};
-use std::error::Error as StdError;
 
 use crate::config::Listener;
+use std::fmt::Display;
 
 mod metrics;
 mod proxy;
@@ -24,7 +24,7 @@ where
     I: Stream<Item = Result<S, E>> + Unpin + Send,
     S: Future<Output = Result<T, E>> + Send + 'static,
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    E: Into<Error>,
+    E: Display,
     R: Filter<Error = Rejection> + Clone + Send + 'static,
     R::Extract: Reply,
 {
@@ -32,23 +32,32 @@ where
     let http = Arc::new(Http::new());
 
     loop {
-        let span = info_span!("test");
+        let span = info_span!("TCP");
         let conn = match io.next().instrument(span.clone()).await {
             Some(Ok(conn)) => conn,
-            Some(Err(e)) => {
-                span.in_scope(|| error!("{}", e));
+            Some(Err(err)) => {
+                span.in_scope(|| error!("{}", err));
                 continue;
-            },
+            }
             None => break,
         };
 
         let http = http.clone();
         let service = service.clone();
 
-        tokio::spawn(async move {
-            let conn = conn.await.unwrap();
-            http.serve_connection(conn, service).await
-        }.instrument(span));
+        tokio::spawn(
+            async move {
+                let conn = match conn.await {
+                    Ok(conn) => conn,
+                    Err(err) => {
+                        error!("{}", err);
+                        return;
+                    }
+                };
+                http.serve_connection(conn, service).await;
+            }
+            .instrument(span),
+        );
     }
 }
 
@@ -68,18 +77,18 @@ pub async fn new(
 
     let http = http
         .map(move |http| proxy::wrap(http, http_proxy))
-        .map(|http| serve(http, routes.clone()))
+        .map(|http| serve(http, routes.clone()).instrument(info_span!("HTTP")))
         .map(tokio::spawn);
 
     let prom = prom
         .map(move |prom| proxy::wrap(prom, prom_proxy))
-        .map(|prom| serve(prom, metrics()))
+        .map(|prom| serve(prom, metrics()).instrument(info_span!("PROM")))
         .map(tokio::spawn);
 
     let https = https
         .map(move |https| proxy::wrap(https, https_proxy))
         .map(|https| tls::wrap(https, pool))
-        .map(|https| serve(https, routes))
+        .map(|https| serve(https, routes).instrument(info_span!("HTTPS")))
         .map(tokio::spawn);
 
     info!("Starting API");

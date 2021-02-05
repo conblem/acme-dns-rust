@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::io::poll_read_buf;
 use tracing::field::{display, Empty};
-use tracing::{debug_span, error, info, Instrument};
+use tracing::{debug_span, error, info, Instrument, Span};
 
 use crate::config::ProxyProtocol;
 
@@ -21,7 +21,11 @@ pub(super) fn wrap(
     proxy: ProxyProtocol,
 ) -> impl Stream<Item = IoResult<impl Future<Output = IoResult<ProxyStream>>>> + Send {
     TcpListenerStream::new(listener)
-        .map_ok(move |stream| stream.source(proxy))
+        .map_ok(move |stream| {
+            let span = Span::current();
+            span.record_all()
+            stream.source(proxy)
+        })
         .map_ok(|mut conn| {
             let span = debug_span!("ADDR", remote.addr = Empty);
             let span_clone = span.clone();
