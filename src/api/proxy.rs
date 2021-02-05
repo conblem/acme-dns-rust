@@ -10,11 +10,11 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
+use tokio_util::io::poll_read_buf;
 use tracing::field::{display, Empty};
 use tracing::{debug_span, error, info, Instrument};
 
 use crate::config::ProxyProtocol;
-use tokio_util::io::poll_read_buf;
 
 pub(super) fn wrap(
     listener: TcpListener,
@@ -187,6 +187,12 @@ impl Future for PeerAddrFuture<'_> {
         };
 
         match ready!(poll_read_buf(stream, cx, data)) {
+            Ok(0) => {
+                return Poll::Ready(Err(IoError::new(
+                    ErrorKind::UnexpectedEof,
+                    "Streamed finished before end of proxy protocol header",
+                )))
+            }
             Ok(_) => {}
             Err(e) => return Poll::Ready(Err(e)),
         };

@@ -18,7 +18,7 @@ use crate::util::to_u64;
 pub(super) fn wrap<L, I>(
     listener: L,
     pool: PgPool,
-) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
+) -> impl Stream<Item = Result<impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>>> + Send
 where
     L: Stream<Item = IoResult<I>> + Send,
     I: Future<Output = IoResult<ProxyStream>> + Send,
@@ -33,9 +33,6 @@ where
             let (conn, tls) = tokio::try_join!(conn.err_into(), acceptor.load_cert())?;
             Ok(tls.accept(conn).await?)
         })
-        .try_buffer_unordered(100)
-        .inspect_err(|err| error!("Stream error: {:?}", err))
-        .filter(|stream| futures_util::future::ready(stream.is_ok()))
 }
 
 struct Acceptor {
