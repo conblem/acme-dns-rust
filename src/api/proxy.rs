@@ -24,10 +24,9 @@ pub(super) fn wrap(
         .map_ok(move |stream| {
             let span = Span::current();
             span.record("remote.addr", &debug(stream.peer_addr()));
-            (stream.source(proxy), span)
-        })
-        .map_ok(|(mut conn, span)| {
             let span_clone = span.clone();
+
+            let mut conn = stream.source(proxy);
             async move {
                 match conn.proxy_peer().await {
                     Ok(Some(addr)) => {
