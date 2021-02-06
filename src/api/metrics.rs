@@ -1,3 +1,4 @@
+use futures_util::TryStreamExt;
 use lazy_static::lazy_static;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
@@ -27,17 +28,27 @@ lazy_static! {
     .unwrap();
 }
 
-enum MetricsConfig {
+pub(super) enum MetricsConfig {
     Borrowed(&'static str),
     Owned(FullPath),
 }
 
 impl MetricsConfig {
-    fn new(config: &'static str, path: FullPath) -> MetricsConfig {
-        match config {
-            "" => Self::Owned(path),
-            config => Self::Borrowed(config),
-        }
+    pub(super) fn new(
+        config: &'static str,
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Rejection> + Clone + Send + Sync + 'static
+    {
+        warp::any().map(|| MetricsConfig::Borrowed(config))
+    }
+
+    pub(super) fn path(
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Rejection> + Clone + Send + Sync + 'static
+    {
+        warp::filters::path::full()
+            .and_then(|res: FullPath| {
+                futures_util::future::ready(Ok(res) as Result<_, Rejection>)
+            })
+            .map(MetricsConfig::Owned)
     }
 
     fn as_str(&self) -> &str {
@@ -48,78 +59,44 @@ impl MetricsConfig {
     }
 }
 
-pub(super) trait MetricFn<R, I>: Fn(I) -> <Self as MetricFn<R, I>>::Output
-where
-    R: Reply,
-    I: Filter<Extract = (R,), Error = Rejection>,
-{
-    type Output: Filter<Extract = (WarpResponse,), Error = Rejection>
-        + Clone
-        + Send
-        + Sync
-        + 'static;
-}
-
-impl<R, I, O, F> MetricFn<R, I> for F
-where
-    R: Reply,
-    I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
-    O: Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + Sync + 'static,
-    F: Fn(I) -> O,
-{
-    type Output = O;
-}
-
-fn stop_metrics<R: Reply>(
-    config: MetricsConfig,
-    method: Method,
-    mut timer: HistogramTimerWrapper,
-    res: R,
-) -> WarpResponse {
-    let res = res.into_response();
-
-    HTTP_STATUS_COUNTER
-        .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
-        .inc();
-
-    if let Some(timer) = timer.take() {
-        let time = timer.stop_and_record() * 1000f64;
-        debug!("request took {}ms", time);
-    }
-
-    res
-}
-
-pub(super) fn metrics_wrapper<R, I, C>(config: C) -> impl MetricFn<R, I>
+pub(super) fn metrics_wrapper<R, F>(
+    filter: F,
+) -> impl Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static
 where
     R: Reply + 'static,
-    I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
-    C: Into<Option<&'static str>>,
+    F: Filter<Extract = (R, MetricsConfig), Error = Rejection> + Clone + Send + Sync + 'static,
 {
-    let config = match config.into() {
-        Some("") => panic!("Empty str not allowed as param"),
-        Some(config) => config,
-        None => "",
-    };
+    warp::filters::method::method()
+        .map(|method| {
+            let timer = HTTP_REQ_HISTOGRAM
+                .with_label_values(&[])
+                .start_timer()
+                .into();
+            (method, timer)
+        })
+        .untuple_one()
+        .and(filter)
+        .map(
+            |method: Method, mut timer: HistogramTimerWrapper, res: R, config: MetricsConfig| {
+                let res = res.into_response();
 
-    move |filter: I| {
-        warp::filters::path::full()
-            .and(warp::filters::method::method())
-            .map(move |path: FullPath, method: Method| {
-                let config = MetricsConfig::new(config, path);
-                let timer = HTTP_REQ_HISTOGRAM
-                    .with_label_values(&[config.as_str(), method.as_str()])
-                    .start_timer()
-                    .into();
+                HTTP_STATUS_COUNTER
+                    .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
+                    .inc();
 
-                (config, method, timer)
-            })
-            .untuple_one()
-            .and(filter)
-            .map(stop_metrics)
-            .with(trace::request())
-            .map(Reply::into_response)
-    }
+                if let Some(timer) = timer.take() {
+                    let time = timer.stop_and_discard();
+
+                    HTTP_REQ_HISTOGRAM
+                        .with_label_values(&[config.as_str(), method.as_str()])
+                        .observe(time);
+
+                    debug!("request took {}ms", time * 1000f64);
+                }
+
+                res
+            },
+        )
 }
 
 fn internal_server_error_and_trace<E: Display>(error: &E) -> HttpResult<Response<String>> {
@@ -169,7 +146,9 @@ pub(super) fn metrics(
     warp::path(METRICS_PATH)
         .and(warp::get())
         .map(metrics_handler)
-        .with(warp::wrap_fn(metrics_wrapper(None)))
+        .and(MetricsConfig::path())
+        .with(warp::wrap_fn(metrics_wrapper))
+        .with(trace::request())
 }
 
 // Changes the default behaviour of HistogramTimer so it doesn't record the value if it is being dropped

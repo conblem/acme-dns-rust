@@ -2,12 +2,15 @@ use anyhow::Result;
 use sqlx::PgPool;
 use std::convert::TryFrom;
 use tracing::error;
+use warp::filters::trace;
 use warp::http::{Response, StatusCode};
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
 use super::metrics_wrapper;
+use crate::api::metrics::MetricsConfig;
 use crate::domain::{Domain, DomainDTO, DomainFacade};
+use futures_util::SinkExt;
 
 async fn register_handler(pool: PgPool) -> Result<impl Reply, Rejection> {
     let res: Result<DomainDTO> = async {
@@ -55,7 +58,7 @@ pub(super) fn routes(
         .and(warp::post())
         .and(pool.clone())
         .and_then(register_handler)
-        .with(warp::wrap_fn(metrics_wrapper(None)));
+        .and(MetricsConfig::path());
 
     let update = warp::path(UPDATE_PATH)
         .and(warp::post())
@@ -63,7 +66,7 @@ pub(super) fn routes(
         .and(warp::header(X_API_KEY_HEADER))
         .and(pool)
         .and_then(update_handler)
-        .with(warp::wrap_fn(metrics_wrapper(None)));
+        .and(MetricsConfig::path());
 
     let not_found = warp::any()
         .map(warp::reply)
@@ -71,7 +74,11 @@ pub(super) fn routes(
             let res = warp::reply::with_status(reply, StatusCode::NOT_FOUND).into_response();
             Ok(res) as Result<WarpResponse, Rejection>
         })
-        .with(warp::wrap_fn(metrics_wrapper("404")));
+        .and(MetricsConfig::new("404"));
 
-    register.or(update).or(not_found)
+    register
+        .or(update)
+        .or(not_found)
+        .with(warp::wrap_fn(metrics_wrapper))
+        .with(trace::request())
 }
