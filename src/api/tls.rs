@@ -54,9 +54,9 @@ impl Acceptor {
         })
     }
 
-    fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
+    fn create_server_config(&self, db_cert: &Cert) -> Result<Arc<ServerConfig>> {
         let (private, cert) = match (&db_cert.private, &db_cert.cert) {
-            (Some(ref private), Some(ref cert)) => (private, cert),
+            (Some(private), Some(cert)) => (private, cert),
             _ => return Err(anyhow!("Cert has no Cert or Private")),
         };
 
@@ -88,10 +88,10 @@ impl Acceptor {
         };
         info!(timestamp = to_u64(&db_cert.update), "Found new cert");
 
-        let server_config = match Acceptor::create_server_config(&db_cert) {
+        let server_config = match self.create_server_config(&db_cert) {
             Ok(server_config) => server_config,
             Err(e) => {
-                error!("{:?}", e);
+                error!("{}", e);
                 let (_, server_config) = &*self.config.read();
                 return Ok(TlsAcceptor::from(Arc::clone(server_config)));
             }

@@ -1,4 +1,5 @@
-use std::io;
+use anyhow::Error;
+use std::io::{Error as IoError, ErrorKind};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -17,11 +18,11 @@ pub(crate) fn now() -> u64 {
         .as_secs()
 }
 
-pub(crate) fn error<E: From<io::Error>>(err: impl Into<anyhow::Error>) -> E {
+pub(crate) fn error<I: Into<Error>, E: From<IoError>>(err: I) -> E {
     let err = err.into();
-    let err = match err.downcast::<io::Error>() {
+    let err = match err.downcast::<IoError>() {
         Ok(err) => err,
-        Err(err) => io::Error::new(io::ErrorKind::Other, err),
+        Err(err) => IoError::new(ErrorKind::Other, err),
     };
 
     E::from(err)
@@ -63,8 +64,8 @@ mod tests {
 
     #[test]
     fn io_error_works() {
-        let expected = io::Error::new(io::ErrorKind::InvalidData, anyhow!("Hallo"));
-        let err = io::Error::new(io::ErrorKind::InvalidData, anyhow!("Hallo"));
+        let expected = IoError::new(ErrorKind::InvalidData, "Hallo");
+        let err = IoError::new(ErrorKind::InvalidData, "Hallo");
 
         let actual = match error(err) {
             acme_lib::Error::Io(err) => err,
@@ -83,9 +84,9 @@ mod tests {
             _ => panic!("Cannot match err"),
         };
 
-        assert_eq!(io::ErrorKind::Other, actual.kind());
+        assert_eq!(ErrorKind::Other, actual.kind());
 
-        // is not equal as original error gast boxed by io error
+        // is not equal because original error gets boxed in an io error
         assert_ne!(format!("{:?}", expected), format!("{:?}", actual));
 
         // here we access the actual inner error

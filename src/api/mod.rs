@@ -60,11 +60,13 @@ where
             None => break,
         };
 
-        TCP_TOTAL_CONNECTION_COUNTER.with_label_values(&[endpoint]).inc();
+        TCP_TOTAL_CONNECTION_COUNTER
+            .with_label_values(&[endpoint])
+            .inc();
         let open_counter = TCP_OPEN_CONNECTION_COUNTER.with_label_values(&[endpoint]);
         open_counter.inc();
 
-        let http = http.clone();
+        let http = Arc::clone(&http);
         let service = service.clone();
 
         tokio::spawn(

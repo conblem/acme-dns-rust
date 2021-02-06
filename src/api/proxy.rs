@@ -5,6 +5,7 @@ use ppp::model::{Addresses, Header};
 use std::future::Future;
 use std::io::IoSlice;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
@@ -21,14 +22,14 @@ pub(super) fn wrap(
     proxy: ProxyProtocol,
 ) -> impl Stream<Item = IoResult<impl Future<Output = IoResult<ProxyStream>>>> + Send {
     TcpListenerStream::new(listener)
-        .map_ok(move |stream| {
+        .map_ok(move |conn| conn.source(proxy))
+        .map_ok(|mut conn| {
             let span = Span::current();
-            span.record("remote.addr", &debug(stream.peer_addr()));
+            span.record("remote.addr", &debug(conn.peer_addr()));
             let span_clone = span.clone();
 
-            let mut conn = stream.source(proxy);
             async move {
-                match conn.proxy_peer().await {
+                match conn.real_addr().await {
                     Ok(Some(addr)) => {
                         span.record("remote.real", &display(addr));
                     }
@@ -68,8 +69,8 @@ pub(super) struct ProxyStream {
 }
 
 impl ProxyStream {
-    fn proxy_peer(&mut self) -> PeerAddrFuture<'_> {
-        PeerAddrFuture { proxy_stream: self }
+    fn real_addr(&mut self) -> RealAddrFuture<'_> {
+        RealAddrFuture { proxy_stream: self }
     }
 }
 
@@ -117,11 +118,25 @@ impl AsyncWrite for ProxyStream {
     }
 }
 
-struct PeerAddrFuture<'a> {
+impl Deref for ProxyStream {
+    type Target = TcpStream;
+
+    fn deref(&self) -> &Self::Target {
+        &self.stream
+    }
+}
+
+impl DerefMut for ProxyStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.stream
+    }
+}
+
+struct RealAddrFuture<'a> {
     proxy_stream: &'a mut ProxyStream,
 }
 
-impl<'a> PeerAddrFuture<'a> {
+impl<'a> RealAddrFuture<'a> {
     fn format_header(&self, res: Header) -> Poll<<Self as Future>::Output> {
         let addr = match res.addresses {
             Addresses::IPv4 {
@@ -175,7 +190,7 @@ impl<'a> PeerAddrFuture<'a> {
     }
 }
 
-impl Future for PeerAddrFuture<'_> {
+impl Future for RealAddrFuture<'_> {
     type Output = IoResult<Option<SocketAddr>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
