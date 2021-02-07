@@ -1,14 +1,14 @@
-use futures_util::TryStreamExt;
 use lazy_static::lazy_static;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
     IntCounterVec, TextEncoder,
 };
+use std::convert::Infallible;
 use std::fmt::Display;
 use std::io::{BufRead, Error as IoError};
 use tracing::{debug, error};
 use warp::filters::trace;
-use warp::http::{Method, Response, Result as HttpResult, StatusCode};
+use warp::http::{Method, Response, StatusCode};
 use warp::path::FullPath;
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
@@ -36,19 +36,15 @@ pub(super) enum MetricsConfig {
 impl MetricsConfig {
     pub(super) fn new(
         config: &'static str,
-    ) -> impl Filter<Extract = (MetricsConfig,), Error = Rejection> + Clone + Send + Sync + 'static
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + Sync + 'static
     {
-        warp::any().map(|| MetricsConfig::Borrowed(config))
+        warp::any().map(move || MetricsConfig::Borrowed(config))
     }
 
     pub(super) fn path(
-    ) -> impl Filter<Extract = (MetricsConfig,), Error = Rejection> + Clone + Send + Sync + 'static
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + Sync + 'static
     {
-        warp::filters::path::full()
-            .and_then(|res: FullPath| {
-                futures_util::future::ready(Ok(res) as Result<_, Rejection>)
-            })
-            .map(MetricsConfig::Owned)
+        warp::filters::path::full().map(MetricsConfig::Owned)
     }
 
     fn as_str(&self) -> &str {
@@ -59,17 +55,20 @@ impl MetricsConfig {
     }
 }
 
-pub(super) fn metrics_wrapper<R, F>(
+pub(super) fn metrics_wrapper<F>(
     filter: F,
-) -> impl Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static
+) -> impl Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + Sync + 'static
 where
-    R: Reply + 'static,
-    F: Filter<Extract = (R, MetricsConfig), Error = Rejection> + Clone + Send + Sync + 'static,
+    F: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     warp::filters::method::method()
         .map(|method| {
             let timer = HTTP_REQ_HISTOGRAM
-                .with_label_values(&[])
+                .with_label_values(&["", ""])
                 .start_timer()
                 .into();
             (method, timer)
@@ -77,9 +76,10 @@ where
         .untuple_one()
         .and(filter)
         .map(
-            |method: Method, mut timer: HistogramTimerWrapper, res: R, config: MetricsConfig| {
-                let res = res.into_response();
-
+            |method: Method,
+             mut timer: HistogramTimerWrapper,
+             res: WarpResponse,
+             config: MetricsConfig| {
                 HTTP_STATUS_COUNTER
                     .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
                     .inc();
@@ -99,11 +99,12 @@ where
         )
 }
 
-fn internal_server_error_and_trace<E: Display>(error: &E) -> HttpResult<Response<String>> {
+fn internal_server_error_and_trace<E: Display>(error: &E) -> WarpResponse {
     error!("{}", error);
     Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
         .body(error.to_string())
+        .into_response()
 }
 
 fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
@@ -122,7 +123,7 @@ fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
 
 // maybe this implementation is wrong as it removes bucket items aswell
 // this method leaks internal errors so it should not be public
-fn metrics_handler() -> HttpResult<Response<String>> {
+fn metrics_handler() -> WarpResponse {
     let encoder = TextEncoder::new();
     let families = prometheus::gather();
 
@@ -136,7 +137,7 @@ fn metrics_handler() -> HttpResult<Response<String>> {
         Err(e) => return internal_server_error_and_trace(&e),
     };
 
-    Ok(Response::new(res))
+    Response::new(res).into_response()
 }
 
 const METRICS_PATH: &str = "metrics";

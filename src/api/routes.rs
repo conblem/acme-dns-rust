@@ -7,12 +7,10 @@ use warp::http::{Response, StatusCode};
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
-use super::metrics_wrapper;
-use crate::api::metrics::MetricsConfig;
+use super::{metrics_wrapper, MetricsConfig};
 use crate::domain::{Domain, DomainDTO, DomainFacade};
-use futures_util::SinkExt;
 
-async fn register_handler(pool: PgPool) -> Result<impl Reply, Rejection> {
+async fn register_handler(pool: PgPool) -> Result<WarpResponse, Rejection> {
     let res: Result<DomainDTO> = async {
         let res = DomainDTO::default();
         let domain = Domain::try_from(res.clone())?;
@@ -42,8 +40,12 @@ async fn register_handler(pool: PgPool) -> Result<impl Reply, Rejection> {
 const X_API_USER_HEADER: &str = "X-Api-User";
 const X_API_KEY_HEADER: &str = "X-Api-Key";
 
-async fn update_handler(user: String, key: String, _pool: PgPool) -> Result<impl Reply, Rejection> {
-    Ok(format!("{} {}", user, key))
+async fn update_handler(
+    user: String,
+    key: String,
+    _pool: PgPool,
+) -> Result<WarpResponse, Rejection> {
+    Ok(format!("{} {}", user, key).into_response())
 }
 
 const REGISTER_PATH: &str = "register";
@@ -78,7 +80,9 @@ pub(super) fn routes(
 
     register
         .or(update)
+        .unify()
         .or(not_found)
+        .unify()
         .with(warp::wrap_fn(metrics_wrapper))
         .with(trace::request())
 }

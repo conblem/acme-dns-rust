@@ -4,7 +4,7 @@ use futures_util::stream::Stream;
 use futures_util::{FutureExt, StreamExt, TryFutureExt};
 use hyper::server::conn::Http;
 use lazy_static::lazy_static;
-use metrics::{metrics, metrics_wrapper};
+use metrics::{metrics, metrics_wrapper, MetricsConfig};
 use prometheus::{register_int_counter_vec, register_int_gauge_vec, IntCounterVec, IntGaugeVec};
 use sqlx::PgPool;
 use std::fmt::Display;
