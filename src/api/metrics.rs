@@ -36,13 +36,13 @@ pub(super) enum MetricsConfig {
 impl MetricsConfig {
     pub(super) fn new(
         config: &'static str,
-    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + Sync + 'static
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + 'static
     {
         warp::any().map(move || MetricsConfig::Borrowed(config))
     }
 
     pub(super) fn path(
-    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + Sync + 'static
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + 'static
     {
         warp::filters::path::full().map(MetricsConfig::Owned)
     }
@@ -57,12 +57,11 @@ impl MetricsConfig {
 
 pub(super) fn metrics_wrapper<F>(
     filter: F,
-) -> impl Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + Sync + 'static
+) -> impl Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static
 where
     F: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection>
         + Clone
         + Send
-        + Sync
         + 'static,
 {
     warp::filters::method::method()

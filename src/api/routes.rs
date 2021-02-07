@@ -53,7 +53,7 @@ const UPDATE_PATH: &str = "update";
 
 pub(super) fn routes(
     pool: PgPool,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + Sync + 'static {
+) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {
     let pool = warp::any().map(move || pool.clone());
 
     let register = warp::path(REGISTER_PATH)
