@@ -44,7 +44,7 @@ pub(super) fn wrap(
         })
 }
 
-pub(super) trait ToProxyStream {
+trait ToProxyStream {
     fn source(self, proxy: ProxyProtocol) -> ProxyStream;
 }
 
