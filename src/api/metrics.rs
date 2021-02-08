@@ -28,6 +28,8 @@ lazy_static! {
     .unwrap();
 }
 
+const fn test() {}
+
 pub(super) enum MetricsConfig {
     Borrowed(&'static str),
     Owned(FullPath),
@@ -53,44 +55,76 @@ impl MetricsConfig {
     }
 }
 
+trait MetricsWrapper<I>: Fn(I) -> <Self as MetricsWrapper<I>>::Output
+where
+    I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
+{
+    type Output: Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static;
+}
+
+impl<F, I, O> MetricsWrapper<I> for F
+where
+    F: Fn(I) -> O,
+    I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
+    O: Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static,
+{
+    type Output = O;
+}
+
+fn hihi<I>(
+    http_req_histogram: &'static HistogramVec,
+    http_status_counter: &'static IntCounterVec,
+) -> impl MetricsWrapper<I>
+where
+    I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
+{
+    move |filter: I| {
+        warp::filters::method::method()
+            .map(move |method| {
+                let timer = http_req_histogram
+                    .with_label_values(&["", ""])
+                    .start_timer()
+                    .into();
+                (method, timer)
+            })
+            .untuple_one()
+            .and(filter)
+            .map(
+                move |method: Method,
+                      mut timer: HistogramTimerWrapper,
+                      res: WarpResponse,
+                      config: MetricsConfig| {
+                    http_status_counter
+                        .with_label_values(&[
+                            config.as_str(),
+                            method.as_str(),
+                            res.status().as_str(),
+                        ])
+                        .inc();
+
+                    if let Some(timer) = timer.take() {
+                        let time = timer.stop_and_discard();
+
+                        http_req_histogram
+                            .with_label_values(&[config.as_str(), method.as_str()])
+                            .observe(time);
+
+                        debug!("request took {}ms", time * 1000f64);
+                    }
+
+                    res
+                },
+            )
+    }
+}
+
 pub(super) fn metrics_wrapper<F>(
     filter: F,
 ) -> impl Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static
 where
     F: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
 {
-    warp::filters::method::method()
-        .map(|method| {
-            let timer = HTTP_REQ_HISTOGRAM
-                .with_label_values(&["", ""])
-                .start_timer()
-                .into();
-            (method, timer)
-        })
-        .untuple_one()
-        .and(filter)
-        .map(
-            |method: Method,
-             mut timer: HistogramTimerWrapper,
-             res: WarpResponse,
-             config: MetricsConfig| {
-                HTTP_STATUS_COUNTER
-                    .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
-                    .inc();
-
-                if let Some(timer) = timer.take() {
-                    let time = timer.stop_and_discard();
-
-                    HTTP_REQ_HISTOGRAM
-                        .with_label_values(&[config.as_str(), method.as_str()])
-                        .observe(time);
-
-                    debug!("request took {}ms", time * 1000f64);
-                }
-
-                res
-            },
-        )
+    hihi(&*HTTP_REQ_HISTOGRAM, &*HTTP_STATUS_COUNTER)(filter)
 }
 
 fn internal_server_error_and_trace<E: Display>(error: &E) -> WarpResponse {
