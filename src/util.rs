@@ -34,7 +34,7 @@ pub(crate) fn uuid() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{error, now, to_i64, to_u64};
+    use super::{error, now, to_i64, to_u64, uuid};
     use anyhow::anyhow;
     use std::io::{Error as IoError, ErrorKind};
     use std::thread;
@@ -54,6 +54,14 @@ mod tests {
         let res = to_i64(&expected);
         let actual = to_u64(&res);
         assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn uuid_test() {
+        assert_ne!(uuid(), uuid());
+
+        let len = uuid().len();
+        assert_eq!(32, len)
     }
 
     #[test]
