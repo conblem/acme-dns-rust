@@ -137,7 +137,7 @@ struct RealAddrFuture<'a> {
 }
 
 impl<'a> RealAddrFuture<'a> {
-    fn format_header(&self, res: Header) -> Poll<<Self as Future>::Output> {
+    fn format_header(&self, res: Header) -> <Self as Future>::Output {
         let addr = match res.addresses {
             Addresses::IPv4 {
                 source_address,
@@ -156,14 +156,14 @@ impl<'a> RealAddrFuture<'a> {
                 SocketAddrV6::new(source_address.into(), port, 0, 0).into()
             }
             address => {
-                return Poll::Ready(Err(IoError::new(
+                return Err(IoError::new(
                     ErrorKind::Other,
                     format!("Cannot convert {:?} to a SocketAddr", address),
-                )))
+                ))
             }
         };
 
-        Poll::Ready(Ok(Some(addr)))
+        Ok(Some(addr))
     }
 
     fn get_header(&mut self) -> Poll<<Self as Future>::Output> {
@@ -186,7 +186,7 @@ impl<'a> RealAddrFuture<'a> {
             }
         };
 
-        self.format_header(res)
+        Poll::Ready(self.format_header(res))
     }
 }
 
