@@ -71,11 +71,8 @@ pub(super) fn routes(
         .and(MetricsConfig::path());
 
     let not_found = warp::any()
-        .map(warp::reply)
-        .and_then(|reply| async move {
-            let res = warp::reply::with_status(reply, StatusCode::NOT_FOUND).into_response();
-            Ok(res) as Result<WarpResponse, Rejection>
-        })
+        .and_then(|| async move { Ok(StatusCode::NOT_FOUND) as Result<_, Rejection> })
+        .map(Reply::into_response)
         .and(MetricsConfig::new("404"));
 
     register

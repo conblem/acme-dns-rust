@@ -34,8 +34,9 @@ pub(crate) fn uuid() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{error, now, to_i64, to_u64};
     use anyhow::anyhow;
+    use std::io::{Error as IoError, ErrorKind};
     use std::thread;
     use std::time::Duration;
 
@@ -77,9 +78,9 @@ mod tests {
 
     #[test]
     fn error_works() {
-        let expected = anyhow!("test error");
+        let expected = anyhow!("test");
 
-        let actual = match error(anyhow!("test error")) {
+        let actual = match error(anyhow!("test")) {
             acme_lib::Error::Io(err) => err,
             _ => panic!("Cannot match err"),
         };
@@ -91,6 +92,6 @@ mod tests {
 
         // here we access the actual inner error
         let actual = actual.into_inner().expect("Error has no inner error");
-        assert_eq!(format!("{:?}", expected), format!("{:?}", actual));
+        assert_eq!(format!("{}", expected), format!("{}", actual));
     }
 }

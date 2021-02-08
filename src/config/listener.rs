@@ -2,7 +2,7 @@ use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt::Formatter;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ProxyProtocol {
     Enabled,
     Disabled,
@@ -44,7 +44,7 @@ where
         where
             E: serde::de::Error,
         {
-            Ok((String::from(value).into(), ProxyProtocol::Disabled))
+            Ok((value.to_owned().into(), ProxyProtocol::Disabled))
         }
 
         fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -58,4 +58,66 @@ where
         }
     }
     deserializer.deserialize_any(ListenerVisitor)
+}
+#[cfg(test)]
+mod tests {
+    use super::{deserialize, Listener, ProxyProtocol};
+    use serde::Deserialize;
+    use serde_test::{assert_de_tokens, Token};
+
+    #[derive(Deserialize, PartialEq, Debug)]
+    struct ListenerWrapper(#[serde(deserialize_with = "deserialize")] Listener);
+
+    #[test]
+    fn default() {
+        assert_eq!(ProxyProtocol::Disabled, ProxyProtocol::default());
+    }
+
+    #[test]
+    fn deserialize_str_test() {
+        let listener = ListenerWrapper((Some("test".into()), ProxyProtocol::Disabled));
+
+        assert_de_tokens(
+            &listener,
+            &[
+                Token::NewtypeStruct {
+                    name: "ListenerWrapper",
+                },
+                Token::Str("test"),
+            ],
+        );
+    }
+
+    #[test]
+    fn deserialize_str_and_bool() {
+        let listener = ListenerWrapper((Some("ip".into()), ProxyProtocol::Enabled));
+
+        assert_de_tokens(
+            &listener,
+            &[
+                Token::NewtypeStruct {
+                    name: "ListenerWrapper",
+                },
+                Token::Seq { len: Some(2) },
+                Token::Str("ip"),
+                Token::Bool(true),
+                Token::SeqEnd,
+            ],
+        );
+
+        let listener = ListenerWrapper((Some("name".into()), ProxyProtocol::Disabled));
+
+        assert_de_tokens(
+            &listener,
+            &[
+                Token::NewtypeStruct {
+                    name: "ListenerWrapper",
+                },
+                Token::Seq { len: Some(2) },
+                Token::Str("name"),
+                Token::Bool(false),
+                Token::SeqEnd,
+            ],
+        )
+    }
 }
