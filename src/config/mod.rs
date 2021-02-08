@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::Deserialize;
-use std::fs::File;
-use std::io::Read;
+use std::fs::read_to_string;
 use tracing::{debug, info, info_span};
 
 pub use listener::{Listener, ProxyProtocol};
@@ -54,17 +53,32 @@ pub fn load_config(config_path: Option<String>) -> Result<Config> {
     let span = info_span!("load_config", config_path);
     let _enter = span.enter();
 
-    let mut file = File::open(config_path)?;
-    debug!(?file, "Opened file");
+    let file = read_to_string(config_path)?;
+    debug!(file_length = file.len(), "Read file");
 
-    let mut bytes = vec![];
-    file.read_to_end(&mut bytes)?;
-    debug!(file_length = bytes.len(), "Read file");
-
-    let config = toml::de::from_slice::<Config>(&bytes)?;
+    let config = toml::de::from_slice::<Config>(file.as_ref())?;
     // redact db information
     let config_str = format!("{:?}", config).replace(&config.general.db, "******");
     info!(config = %config_str, "Deserialized config");
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_config;
+    use std::path::Path;
+    use tracing_test::traced_test;
+
+    #[test]
+    #[traced_test]
+    fn load_config_test() {
+        let path = Path::new(file!()).with_file_name("test_config.toml");
+        let path = path.to_string_lossy().into_owned();
+        let config = load_config(Some(path)).unwrap();
+
+        // check if logs contain redacted db information
+        let config = format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
+        assert!(logs_contain(&config));
+    }
 }

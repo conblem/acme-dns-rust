@@ -1,0 +1,11 @@
+[general]
+dns = "0.0.0.0:53"
+db = "postgres://root@localhost/acme"
+acme = "https://acme.example.com/directory"
+name = "acme.example.com"
+
+[records."acme.example.com"]
+A = [100, "1.1.1.1", "2.2.2.2"]
+
+[api]
+https = "0.0.0.0:443"

@@ -149,28 +149,62 @@ mod tests {
         #[serde(deserialize_with = "deserialize")] PreconfiguredRecords,
     );
 
+    fn a_record_tokens() -> [Token; 8] {
+        [
+            Token::BorrowedStr("acme.example.com"),
+            Token::Map { len: Some(1) },
+            Token::BorrowedStr("A"),
+            Token::Seq { len: Some(2) },
+            Token::U32(100),
+            Token::BorrowedStr("1.1.1.1"),
+            Token::SeqEnd,
+            Token::MapEnd,
+        ]
+    }
+
+    fn cname_record_tokens() -> [Token; 8] {
+        [
+            Token::BorrowedStr("acme.example.com"),
+            Token::Map { len: Some(1) },
+            Token::BorrowedStr("CNAME"),
+            Token::Seq { len: Some(2) },
+            Token::U32(1000),
+            Token::BorrowedStr("google.com"),
+            Token::SeqEnd,
+            Token::MapEnd,
+        ]
+    }
+
+    fn txt_record_tokens() -> [Token; 8] {
+        [
+            Token::BorrowedStr("acme.example.com"),
+            Token::Map { len: Some(1) },
+            Token::BorrowedStr("TXT"),
+            Token::Seq { len: Some(2) },
+            Token::U32(200),
+            Token::BorrowedStr("Hallo Welt"),
+            Token::SeqEnd,
+            Token::MapEnd,
+        ]
+    }
+
     #[test]
     fn deserialize_test() {
         let records = Default::default();
         let records = PreconfiguredRecordsWrapper(records);
 
-        assert_de_tokens(
-            &records,
-            &[
-                Token::NewtypeStruct {
-                    name: "PreconfiguredRecordsWrapper",
-                },
-                Token::Map { len: Some(1) },
-                Token::BorrowedStr("acme.example.com"),
-                Token::Map { len: Some(1) },
-                Token::BorrowedStr("A"),
-                Token::Seq { len: Some(2) },
-                Token::U32(100),
-                Token::BorrowedStr("1.1.1.1"),
-                Token::SeqEnd,
-                Token::MapEnd,
-                Token::MapEnd,
-            ],
-        )
+        // header
+        let mut records_token = vec![
+            Token::NewtypeStruct {
+                name: "PreconfiguredRecordsWrapper",
+            },
+            Token::Map { len: Some(1) },
+        ];
+        records_token.extend_from_slice(&a_record_tokens());
+        records_token.extend_from_slice(&cname_record_tokens());
+        records_token.extend_from_slice(&txt_record_tokens());
+        records_token.push(Token::MapEnd);
+
+        assert_de_tokens(&records, &records_token)
     }
 }
