@@ -28,8 +28,6 @@ lazy_static! {
     .unwrap();
 }
 
-const fn test() {}
-
 pub(super) enum MetricsConfig {
     Borrowed(&'static str),
     Owned(FullPath),

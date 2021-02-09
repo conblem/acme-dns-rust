@@ -309,11 +309,18 @@ mod tests {
     }
 
     #[test]
-    fn test_adresses() {
+    fn test_addresses() {
         let address = [1, 1, 1, 1, 1, 1, 1, 1];
         let addresses = Addresses::from((address, address, 24034, 443));
 
         let actual = format_header(generate_header(addresses)).unwrap();
         assert_eq!(SocketAddr::from((address, 24034)), actual);
+
+        let address = [
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        ];
+        let addresses = Addresses::from((address, address));
+
+        assert!(format_header(generate_header(addresses)).is_err());
     }
 }
