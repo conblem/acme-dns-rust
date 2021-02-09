@@ -11,11 +11,10 @@ use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use super::proxy::ProxyStream;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
 
-pub(super) fn wrap<L, I>(
+pub(super) fn wrap<L, I, S>(
     listener: L,
     pool: PgPool,
 ) -> impl Stream<
@@ -25,7 +24,8 @@ pub(super) fn wrap<L, I>(
 > + Send
 where
     L: Stream<Item = IoResult<I>> + Send,
-    I: Future<Output = IoResult<ProxyStream>> + Send,
+    I: Future<Output = IoResult<S>> + Send,
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     let acceptor = Acceptor::new(pool);
 
