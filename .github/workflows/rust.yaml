@@ -74,8 +74,6 @@ jobs:
             target
           key: ${{ runner.os }}-coverage-1-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/tarpaulin@v0.1
-        with:
-          args: '-- --test-threads 1'
       - uses: codecov/codecov-action@v1
         with:
           fail_ci_if_error: true
