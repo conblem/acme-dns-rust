@@ -240,16 +240,17 @@ where
 #[cfg(test)]
 mod tests {
     use ppp::model::{Addresses, Command, Header, Protocol, Version};
-    use std::io::Cursor;
+    use std::io::{Error as IoError, ErrorKind, Result as IoResult};
     use std::net::SocketAddr;
     use tokio::io::AsyncReadExt;
+    use tokio_test::io::Builder;
 
-    use super::{format_header, ToProxyStream};
+    use super::{format_header, RemoteAddr, ToProxyStream};
     use crate::config::ProxyProtocol;
 
     #[tokio::test]
     async fn test_disabled() {
-        let mut proxy_stream = Cursor::new(vec![]).source(ProxyProtocol::Disabled);
+        let mut proxy_stream = Builder::new().build().source(ProxyProtocol::Disabled);
         assert!(proxy_stream.real_addr().await.unwrap().is_none());
     }
 
@@ -272,14 +273,15 @@ mod tests {
     async fn test_header_parsing() {
         let mut header = ppp::to_bytes(generate_ipv4()).unwrap();
         header.extend_from_slice("Test".as_ref());
-        let mut header = Cursor::new(header).source(ProxyProtocol::Enabled);
 
-        let actual = header.real_addr().await.unwrap().unwrap();
+        let proxy_stream = &mut &mut header[..].source(ProxyProtocol::Enabled);
+
+        let actual = proxy_stream.real_addr().await.unwrap().unwrap();
 
         assert_eq!(SocketAddr::from(([1, 1, 1, 1], 24034)), actual);
 
         let mut actual = String::new();
-        let size = header.read_to_string(&mut actual).await.unwrap();
+        let size = proxy_stream.read_to_string(&mut actual).await.unwrap();
         assert_eq!(4, size);
         assert_eq!("Test", actual);
     }
@@ -287,10 +289,10 @@ mod tests {
     #[tokio::test]
     async fn test_incomplete() {
         let header = ppp::to_bytes(generate_ipv4()).unwrap();
-        let header = &mut &header[..10];
-        let mut header = header.source(ProxyProtocol::Enabled);
 
+        let header = &mut &mut header[..10].source(ProxyProtocol::Enabled);
         let actual = header.real_addr().await.unwrap_err();
+
         assert_eq!(
             format!("{}", actual),
             "Stream finished before end of proxy protocol header"
@@ -300,12 +302,26 @@ mod tests {
     #[tokio::test]
     async fn test_failure() {
         let invalid = Vec::from("invalid header");
-        let invalid = &mut &invalid[..];
-
-        let mut invalid = invalid.source(ProxyProtocol::Enabled);
+        let invalid = &mut &mut invalid[..].source(ProxyProtocol::Enabled);
 
         let actual = invalid.real_addr().await.unwrap_err();
         assert_eq!(format!("{}", actual), "Proxy Parser Error");
+    }
+
+    #[tokio::test]
+    async fn test_io_error() {
+        // builder needs to be dropped before stream can be used
+        // otherwise the internal tokio arc error has 2 strong references
+        let mut proxy_stream = {
+            let header = ppp::to_bytes(generate_ipv4()).unwrap();
+            let mut builder = Builder::new();
+            builder.read(&header[..10]);
+            builder.read_error(IoError::new(ErrorKind::Other, "Error on IO"));
+            builder.build().source(ProxyProtocol::Enabled)
+        };
+
+        let error = proxy_stream.real_addr().await.unwrap_err();
+        assert_eq!("Error on IO", format!("{}", error));
     }
 
     #[test]
@@ -322,5 +338,18 @@ mod tests {
         let addresses = Addresses::from((address, address));
 
         assert!(format_header(generate_header(addresses)).is_err());
+    }
+
+    #[test]
+    fn test_remote_addr_delegation() {
+        impl RemoteAddr for &[u8] {
+            fn remote_addr(&self) -> IoResult<SocketAddr> {
+                Ok(SocketAddr::from(([1, 1, 1, 1], 443)))
+            }
+        }
+
+        let proxy_stream = &mut &[].source(ProxyProtocol::Enabled);
+        let actual = proxy_stream.remote_addr().unwrap();
+        assert_eq!(SocketAddr::from(([1, 1, 1, 1], 443)), actual)
     }
 }
