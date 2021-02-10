@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::Deserialize;
-use std::fs::read_to_string;
+use std::fs::read;
 use tracing::{debug, info, info_span};
 
 pub use listener::{Listener, ProxyProtocol};
@@ -21,8 +21,9 @@ pub struct Api {
     pub prom: Listener,
 }
 
+const DEFAULT_ACME: &str = "https://acme-v02.api.letsencrypt.org/directory";
 fn default_acme() -> String {
-    "https://acme-v02.api.letsencrypt.org/directory".to_string()
+    DEFAULT_ACME.to_string()
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,10 +54,10 @@ pub fn load_config(config_path: Option<String>) -> Result<Config> {
     let span = info_span!("load_config", config_path);
     let _enter = span.enter();
 
-    let file = read_to_string(config_path)?;
+    let file = read(config_path)?;
     debug!(file_length = file.len(), "Read file");
 
-    let config = toml::de::from_slice::<Config>(file.as_ref())?;
+    let config = toml::de::from_slice::<Config>(&file)?;
     // redact db information
     let config_str = format!("{:?}", config).replace(&config.general.db, "******");
     info!(config = %config_str, "Deserialized config");
@@ -69,7 +70,7 @@ mod tests {
     use std::path::Path;
     use tracing_test::traced_test;
 
-    use super::load_config;
+    use super::{default_acme, load_config, DEFAULT_ACME};
 
     #[test]
     #[traced_test]
@@ -81,5 +82,10 @@ mod tests {
         // check if logs contain redacted db information
         let config = format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
         assert!(logs_contain(&config));
+    }
+
+    #[test]
+    fn test_default_acme() {
+        assert_eq!(DEFAULT_ACME, default_acme());
     }
 }
