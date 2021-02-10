@@ -60,7 +60,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
   coverage:
-    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
