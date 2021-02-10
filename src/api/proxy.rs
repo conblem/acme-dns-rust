@@ -1,54 +1,77 @@
 use futures_util::stream::Stream;
-use futures_util::TryStreamExt;
+use futures_util::{ready, TryStreamExt};
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
-use std::io::{Cursor, IoSlice, Write};
-use std::mem::MaybeUninit;
+use std::io::IoSlice;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error as IoError, ErrorKind, ReadBuf, Result as IoResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::field::{display, Empty};
-use tracing::{debug_span, error, info, Instrument, Span};
+use tokio_util::io::poll_read_buf;
+use tracing::field::{debug, display};
+use tracing::{error, Instrument, Span};
 
 use crate::config::ProxyProtocol;
+
+trait RemoteAddr {
+    fn remote_addr(&self) -> IoResult<SocketAddr>;
+}
+
+impl RemoteAddr for TcpStream {
+    fn remote_addr(&self) -> IoResult<SocketAddr> {
+        self.peer_addr()
+    }
+}
+
+impl<T: RemoteAddr> RemoteAddr for ProxyStream<T> {
+    fn remote_addr(&self) -> IoResult<SocketAddr> {
+        self.stream.remote_addr()
+    }
+}
 
 pub(super) fn wrap(
     listener: TcpListener,
     proxy: ProxyProtocol,
-) -> impl Stream<Item = IoResult<ProxyStream>> + Send {
+) -> impl Stream<
+    Item = IoResult<
+        impl Future<Output = IoResult<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>,
+    >,
+> + Send {
     TcpListenerStream::new(listener)
-        .map_ok(move |stream| stream.source(proxy))
+        .map_ok(move |conn| conn.source(proxy))
         .map_ok(|mut conn| {
-            let span = debug_span!("ADDR", remote.addr = Empty);
+            let span = Span::current();
+            span.record("remote.addr", &debug(conn.remote_addr()));
+            let span_clone = span.clone();
+
             async move {
-                let span = Span::current();
-                match conn.proxy_peer().await {
-                    Ok(addr) => {
-                        span.record("remote.addr", &display(addr));
-                        info!("Got addr {}", addr)
+                match conn.real_addr().await {
+                    Ok(Some(addr)) => {
+                        span.record("remote.real", &display(addr));
                     }
+                    Ok(None) => {}
                     Err(e) => {
-                        span.record("remote.addr", &"Unknown");
                         error!("Could net get remote.addr: {}", e);
                     }
                 }
                 Ok(conn)
             }
-            .instrument(span)
+            .instrument(span_clone)
         })
-        .try_buffer_unordered(100)
 }
 
-pub(super) trait ToProxyStream: Sized {
-    fn source(self, proxy: ProxyProtocol) -> ProxyStream;
+trait ToProxyStream: Sized {
+    fn source(self, proxy: ProxyProtocol) -> ProxyStream<Self>;
 }
 
-impl ToProxyStream for TcpStream {
-    fn source(self, proxy: ProxyProtocol) -> ProxyStream {
+impl<T> ToProxyStream for T
+where
+    T: AsyncRead + Unpin,
+{
+    fn source(self, proxy: ProxyProtocol) -> ProxyStream<T> {
         let data = match proxy {
             ProxyProtocol::Enabled => Some(Default::default()),
             ProxyProtocol::Disabled => None,
@@ -61,19 +84,25 @@ impl ToProxyStream for TcpStream {
     }
 }
 
-pub(super) struct ProxyStream {
-    stream: TcpStream,
-    data: Option<Cursor<Vec<u8>>>,
+pub(super) struct ProxyStream<T> {
+    stream: T,
+    data: Option<Vec<u8>>,
     start_of_data: usize,
 }
 
-impl ProxyStream {
-    fn proxy_peer(&mut self) -> PeerAddrFuture<'_> {
-        PeerAddrFuture::new(self)
+impl<T> ProxyStream<T>
+where
+    T: AsyncRead + Unpin,
+{
+    fn real_addr(&mut self) -> RealAddrFuture<'_, T> {
+        RealAddrFuture { proxy_stream: self }
     }
 }
 
-impl AsyncRead for ProxyStream {
+impl<T> AsyncRead for ProxyStream<T>
+where
+    T: AsyncRead + Unpin,
+{
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -81,13 +110,16 @@ impl AsyncRead for ProxyStream {
     ) -> Poll<IoResult<()>> {
         let this = self.get_mut();
         if let Some(data) = this.data.take() {
-            buf.put_slice(&data.get_ref()[this.start_of_data..])
+            buf.put_slice(&data[this.start_of_data..])
         }
         Pin::new(&mut this.stream).poll_read(cx, buf)
     }
 }
 
-impl AsyncWrite for ProxyStream {
+impl<T> AsyncWrite for ProxyStream<T>
+where
+    T: AsyncWrite + Unpin,
+{
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -117,100 +149,207 @@ impl AsyncWrite for ProxyStream {
     }
 }
 
-struct PeerAddrFuture<'a> {
-    stream: &'a mut ProxyStream,
+struct RealAddrFuture<'a, T> {
+    proxy_stream: &'a mut ProxyStream<T>,
 }
 
-impl<'a> PeerAddrFuture<'a> {
-    fn new(stream: &'a mut ProxyStream) -> Self {
-        PeerAddrFuture { stream }
-    }
+fn format_header(res: Header) -> IoResult<SocketAddr> {
+    let addr = match res.addresses {
+        Addresses::IPv4 {
+            source_address,
+            source_port,
+            ..
+        } => {
+            let port = source_port.unwrap_or_default();
+            SocketAddrV4::new(source_address.into(), port).into()
+        }
+        Addresses::IPv6 {
+            source_address,
+            source_port,
+            ..
+        } => {
+            let port = source_port.unwrap_or_default();
+            SocketAddrV6::new(source_address.into(), port, 0, 0).into()
+        }
+        address => {
+            return Err(IoError::new(
+                ErrorKind::Other,
+                format!("Cannot convert {:?} to a SocketAddr", address),
+            ))
+        }
+    };
 
-    fn parse_header(&mut self) -> Poll<IoResult<Header>> {
-        let data = match self.stream.data {
-            Some(ref mut data) => data.get_ref(),
+    Ok(addr)
+}
+
+impl<'a, T> RealAddrFuture<'a, T> {
+    fn get_header(&mut self) -> Poll<IoResult<Option<SocketAddr>>> {
+        let data = match &mut self.proxy_stream.data {
+            Some(data) => data,
             None => unreachable!("Future cannot be pulled anymore"),
         };
 
-        match ppp::parse_header(data) {
-            Err(ParseError::Incomplete) => Poll::Pending,
-            Err(ParseError::Failure) => Poll::Ready(Err(IoError::new(
-                ErrorKind::InvalidData,
-                "Proxy Parser Error",
-            ))),
-            Ok((remaining, res)) => {
-                self.stream.start_of_data = data.len() - remaining.len();
-                Poll::Ready(Ok(res))
-            }
-        }
-    }
-
-    fn format_header(res: Header) -> Poll<<Self as Future>::Output> {
-        let addr = match res.addresses {
-            Addresses::IPv4 {
-                source_address,
-                source_port,
-                ..
-            } => {
-                let port = source_port.unwrap_or_default();
-                SocketAddrV4::new(source_address.into(), port).into()
-            }
-            Addresses::IPv6 {
-                source_address,
-                source_port,
-                ..
-            } => {
-                let port = source_port.unwrap_or_default();
-                SocketAddrV6::new(source_address.into(), port, 0, 0).into()
-            }
-            address => {
+        let res = match ppp::parse_header(data) {
+            Err(ParseError::Incomplete) => return Poll::Pending,
+            Err(ParseError::Failure) => {
                 return Poll::Ready(Err(IoError::new(
-                    ErrorKind::Other,
-                    format!("Cannot convert {:?} to a SocketAddr", address),
+                    ErrorKind::InvalidData,
+                    "Proxy Parser Error",
                 )))
             }
+            Ok((remaining, res)) => {
+                self.proxy_stream.start_of_data = data.len() - remaining.len();
+                res
+            }
         };
 
-        Poll::Ready(Ok(addr))
-    }
-
-    fn get_header(&mut self) -> Poll<<Self as Future>::Output> {
-        let res = match self.parse_header() {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Ready(Ok(res)) => res,
-        };
-
-        PeerAddrFuture::format_header(res)
+        Poll::Ready(format_header(res).map(Some))
     }
 }
 
-impl<'a> Future for PeerAddrFuture<'a> {
-    type Output = IoResult<SocketAddr>;
+impl<T> Future for RealAddrFuture<'_, T>
+where
+    T: AsyncRead + Unpin,
+{
+    type Output = IoResult<Option<SocketAddr>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let stream = &mut this.stream;
+        let stream = Pin::new(&mut this.proxy_stream.stream);
 
-        let data = match &mut stream.data {
-            Some(ref mut data) => data,
-            None => return Poll::Ready(stream.stream.local_addr()),
+        let data = match &mut this.proxy_stream.data {
+            Some(data) => data,
+            None => return Poll::Ready(Ok(None)),
         };
 
-        let mut buf = [MaybeUninit::<u8>::uninit(); 256];
-        let mut buf = ReadBuf::uninit(&mut buf);
-
-        let stream = Pin::new(&mut stream.stream);
-        let buf = match stream.poll_read(cx, &mut buf) {
-            Poll::Ready(Ok(_)) => buf.filled(),
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Pending => return Poll::Pending,
+        match ready!(poll_read_buf(stream, cx, data)) {
+            Ok(0) => {
+                return Poll::Ready(Err(IoError::new(
+                    ErrorKind::UnexpectedEof,
+                    "Stream finished before end of proxy protocol header",
+                )))
+            }
+            Ok(_) => {}
+            Err(e) => return Poll::Ready(Err(e)),
         };
-
-        if let Err(e) = data.write_all(buf) {
-            return Poll::Ready(Err(e));
-        }
 
         this.get_header()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ppp::model::{Addresses, Command, Header, Protocol, Version};
+    use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+    use std::net::SocketAddr;
+    use tokio::io::AsyncReadExt;
+    use tokio_test::io::Builder;
+
+    use super::{format_header, RemoteAddr, ToProxyStream};
+    use crate::config::ProxyProtocol;
+
+    #[tokio::test]
+    async fn test_disabled() {
+        let mut proxy_stream = Builder::new().build().source(ProxyProtocol::Disabled);
+        assert!(proxy_stream.real_addr().await.unwrap().is_none());
+    }
+
+    fn generate_header(addresses: Addresses) -> Header {
+        Header::new(
+            Version::Two,
+            Command::Proxy,
+            Protocol::Stream,
+            vec![],
+            addresses,
+        )
+    }
+
+    fn generate_ipv4() -> Header {
+        let adresses = Addresses::from(([1, 1, 1, 1], [2, 2, 2, 2], 24034, 443));
+        generate_header(adresses)
+    }
+
+    #[tokio::test]
+    async fn test_header_parsing() {
+        let mut header = ppp::to_bytes(generate_ipv4()).unwrap();
+        header.extend_from_slice("Test".as_ref());
+
+        let proxy_stream = &mut &mut header[..].source(ProxyProtocol::Enabled);
+
+        let actual = proxy_stream.real_addr().await.unwrap().unwrap();
+
+        assert_eq!(SocketAddr::from(([1, 1, 1, 1], 24034)), actual);
+
+        let mut actual = String::new();
+        let size = proxy_stream.read_to_string(&mut actual).await.unwrap();
+        assert_eq!(4, size);
+        assert_eq!("Test", actual);
+    }
+
+    #[tokio::test]
+    async fn test_incomplete() {
+        let header = ppp::to_bytes(generate_ipv4()).unwrap();
+
+        let header = &mut &mut header[..10].source(ProxyProtocol::Enabled);
+        let actual = header.real_addr().await.unwrap_err();
+
+        assert_eq!(
+            format!("{}", actual),
+            "Stream finished before end of proxy protocol header"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_failure() {
+        let invalid = Vec::from("invalid header");
+        let invalid = &mut &mut invalid[..].source(ProxyProtocol::Enabled);
+
+        let actual = invalid.real_addr().await.unwrap_err();
+        assert_eq!(format!("{}", actual), "Proxy Parser Error");
+    }
+
+    #[tokio::test]
+    async fn test_io_error() {
+        // builder needs to be dropped before stream can be used
+        // otherwise the internal tokio arc error has 2 strong references
+        let mut proxy_stream = {
+            let header = ppp::to_bytes(generate_ipv4()).unwrap();
+            let mut builder = Builder::new();
+            builder.read(&header[..10]);
+            builder.read_error(IoError::new(ErrorKind::Other, "Error on IO"));
+            builder.build().source(ProxyProtocol::Enabled)
+        };
+
+        let error = proxy_stream.real_addr().await.unwrap_err();
+        assert_eq!("Error on IO", format!("{}", error));
+    }
+
+    #[test]
+    fn test_addresses() {
+        let address = [1, 1, 1, 1, 1, 1, 1, 1];
+        let addresses = Addresses::from((address, address, 24034, 443));
+
+        let actual = format_header(generate_header(addresses)).unwrap();
+        assert_eq!(SocketAddr::from((address, 24034)), actual);
+
+        let address = [
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        ];
+        let addresses = Addresses::from((address, address));
+
+        assert!(format_header(generate_header(addresses)).is_err());
+    }
+
+    #[test]
+    fn test_remote_addr_delegation() {
+        impl RemoteAddr for &[u8] {
+            fn remote_addr(&self) -> IoResult<SocketAddr> {
+                Ok(SocketAddr::from(([1, 1, 1, 1], 443)))
+            }
+        }
+
+        let proxy_stream = &mut &[].source(ProxyProtocol::Enabled);
+        let actual = proxy_stream.remote_addr().unwrap();
+        assert_eq!(SocketAddr::from(([1, 1, 1, 1], 443)), actual)
     }
 }

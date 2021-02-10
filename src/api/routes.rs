@@ -2,14 +2,15 @@ use anyhow::Result;
 use sqlx::PgPool;
 use std::convert::TryFrom;
 use tracing::error;
+use warp::filters::trace;
 use warp::http::{Response, StatusCode};
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
-use super::metrics_wrapper;
+use super::{metrics_wrapper, MetricsConfig};
 use crate::domain::{Domain, DomainDTO, DomainFacade};
 
-async fn register_handler(pool: PgPool) -> Result<impl Reply, Rejection> {
+async fn register_handler(pool: PgPool) -> Result<WarpResponse, Rejection> {
     let res: Result<DomainDTO> = async {
         let res = DomainDTO::default();
         let domain = Domain::try_from(res.clone())?;
@@ -39,8 +40,12 @@ async fn register_handler(pool: PgPool) -> Result<impl Reply, Rejection> {
 const X_API_USER_HEADER: &str = "X-Api-User";
 const X_API_KEY_HEADER: &str = "X-Api-Key";
 
-async fn update_handler(user: String, key: String, _pool: PgPool) -> Result<impl Reply, Rejection> {
-    Ok(format!("{} {}", user, key))
+async fn update_handler(
+    user: String,
+    key: String,
+    _pool: PgPool,
+) -> Result<WarpResponse, Rejection> {
+    Ok(format!("{} {}", user, key).into_response())
 }
 
 const REGISTER_PATH: &str = "register";
@@ -48,14 +53,14 @@ const UPDATE_PATH: &str = "update";
 
 pub(super) fn routes(
     pool: PgPool,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + Sync + 'static {
+) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {
     let pool = warp::any().map(move || pool.clone());
 
     let register = warp::path(REGISTER_PATH)
         .and(warp::post())
         .and(pool.clone())
         .and_then(register_handler)
-        .with(warp::wrap_fn(metrics_wrapper(None)));
+        .and(MetricsConfig::path());
 
     let update = warp::path(UPDATE_PATH)
         .and(warp::post())
@@ -63,15 +68,18 @@ pub(super) fn routes(
         .and(warp::header(X_API_KEY_HEADER))
         .and(pool)
         .and_then(update_handler)
-        .with(warp::wrap_fn(metrics_wrapper(None)));
+        .and(MetricsConfig::path());
 
     let not_found = warp::any()
-        .map(warp::reply)
-        .and_then(|reply| async move {
-            let res = warp::reply::with_status(reply, StatusCode::NOT_FOUND).into_response();
-            Ok(res) as Result<WarpResponse, Rejection>
-        })
-        .with(warp::wrap_fn(metrics_wrapper("404")));
+        .and_then(|| async move { Ok(StatusCode::NOT_FOUND) as Result<_, Rejection> })
+        .map(Reply::into_response)
+        .and(MetricsConfig::new("404"));
 
-    register.or(update).or(not_found)
+    register
+        .or(update)
+        .unify()
+        .or(not_found)
+        .unify()
+        .with(warp::wrap_fn(metrics_wrapper))
+        .with(trace::request())
 }

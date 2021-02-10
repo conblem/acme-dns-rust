@@ -1,23 +1,31 @@
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use futures_util::stream::{repeat, Stream};
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use sqlx::PgPool;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use super::proxy::ProxyStream;
 use crate::cert::{Cert, CertFacade};
 use crate::util::to_u64;
 
-pub(super) fn wrap(
-    listener: impl Stream<Item = IoResult<ProxyStream>> + Send,
+pub(super) fn wrap<L, I, S>(
+    listener: L,
     pool: PgPool,
-) -> impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static, Error>> + Send
+) -> impl Stream<
+    Item = Result<
+        impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>,
+    >,
+> + Send
+where
+    L: Stream<Item = IoResult<I>> + Send,
+    I: Future<Output = IoResult<S>> + Send,
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     let acceptor = Acceptor::new(pool);
 
@@ -26,13 +34,9 @@ pub(super) fn wrap(
         .zip(repeat(acceptor))
         .map(|(conn, acceptor)| conn.map(|c| (c, acceptor)))
         .map_ok(|(conn, acceptor)| async move {
-            let tls = acceptor.load_cert().await?;
+            let (conn, tls) = tokio::try_join!(conn.err_into(), acceptor.load_cert())?;
             Ok(tls.accept(conn).await?)
         })
-        .try_buffer_unordered(100)
-        .inspect_err(|err| error!("Stream error: {:?}", err))
-        .filter(|stream| futures_util::future::ready(stream.is_ok()))
-        .into_stream()
 }
 
 struct Acceptor {
@@ -50,9 +54,9 @@ impl Acceptor {
         })
     }
 
-    fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
+    fn create_server_config(&self, db_cert: &Cert) -> Result<Arc<ServerConfig>> {
         let (private, cert) = match (&db_cert.private, &db_cert.cert) {
-            (Some(ref private), Some(ref cert)) => (private, cert),
+            (Some(private), Some(cert)) => (private, cert),
             _ => return Err(anyhow!("Cert has no Cert or Private")),
         };
 
@@ -84,10 +88,10 @@ impl Acceptor {
         };
         info!(timestamp = to_u64(&db_cert.update), "Found new cert");
 
-        let server_config = match Acceptor::create_server_config(&db_cert) {
+        let server_config = match self.create_server_config(&db_cert) {
             Ok(server_config) => server_config,
             Err(e) => {
-                error!("{:?}", e);
+                error!("{}", e);
                 let (_, server_config) = &*self.config.read();
                 return Ok(TlsAcceptor::from(Arc::clone(server_config)));
             }

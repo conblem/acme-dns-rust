@@ -27,11 +27,8 @@ where
         {
             let mut res = HashMap::new();
             while let Some(key) = map.next_key::<&str>()? {
-                let name = match Name::from_str(key) {
-                    Err(e) => return Err(DeError::custom(e)),
-                    Ok(name) => name,
-                };
-
+                let mut name = Name::from_str(key).map_err(DeError::custom)?;
+                name.set_fqdn(true);
                 let (record_type, record_set) = map.next_value_seed(RecordDataSeed(name))?;
 
                 res.insert(record_type, record_set);
@@ -66,7 +63,7 @@ impl<'de> DeserializeSeed<'de> for RecordDataSeed {
                 A: MapAccess<'de>,
             {
                 let name = self.0;
-                let mut res = HashMap::new();
+                let mut res = HashMap::with_capacity(map.size_hint().unwrap_or_default());
                 while let Some(record_type) = map.next_key::<&str>()? {
                     let record_type = match record_type {
                         "TXT" => RecordType::TXT,
@@ -138,5 +135,76 @@ impl<'de> DeserializeSeed<'de> for RecordSeed {
         }
 
         deserializer.deserialize_seq(RecordVisitor(self.0, self.1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{deserialize, PreconfiguredRecords};
+    use serde::Deserialize;
+    use serde_test::{assert_de_tokens, Token};
+
+    #[derive(Deserialize, PartialEq, Debug)]
+    struct PreconfiguredRecordsWrapper(
+        #[serde(deserialize_with = "deserialize")] PreconfiguredRecords,
+    );
+
+    fn a_record_tokens() -> [Token; 8] {
+        [
+            Token::BorrowedStr("acme.example.com"),
+            Token::Map { len: Some(1) },
+            Token::BorrowedStr("A"),
+            Token::Seq { len: Some(2) },
+            Token::U32(100),
+            Token::BorrowedStr("1.1.1.1"),
+            Token::SeqEnd,
+            Token::MapEnd,
+        ]
+    }
+
+    fn cname_record_tokens() -> [Token; 8] {
+        [
+            Token::BorrowedStr("acme.example.com"),
+            Token::Map { len: Some(1) },
+            Token::BorrowedStr("CNAME"),
+            Token::Seq { len: Some(2) },
+            Token::U32(1000),
+            Token::BorrowedStr("google.com"),
+            Token::SeqEnd,
+            Token::MapEnd,
+        ]
+    }
+
+    fn txt_record_tokens() -> [Token; 8] {
+        [
+            Token::BorrowedStr("acme.example.com"),
+            Token::Map { len: Some(1) },
+            Token::BorrowedStr("TXT"),
+            Token::Seq { len: Some(2) },
+            Token::U32(200),
+            Token::BorrowedStr("Hallo Welt"),
+            Token::SeqEnd,
+            Token::MapEnd,
+        ]
+    }
+
+    #[test]
+    fn deserialize_test() {
+        let records = Default::default();
+        let records = PreconfiguredRecordsWrapper(records);
+
+        // header
+        let mut records_token = vec![
+            Token::NewtypeStruct {
+                name: "PreconfiguredRecordsWrapper",
+            },
+            Token::Map { len: Some(1) },
+        ];
+        records_token.extend_from_slice(&a_record_tokens());
+        records_token.extend_from_slice(&cname_record_tokens());
+        records_token.extend_from_slice(&txt_record_tokens());
+        records_token.push(Token::MapEnd);
+
+        assert_de_tokens(&records, &records_token)
     }
 }

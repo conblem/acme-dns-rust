@@ -1,20 +1,17 @@
-use futures_util::stream;
-use hyper::Body;
 use lazy_static::lazy_static;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
     IntCounterVec, TextEncoder,
 };
-use std::io::{BufRead, Cursor};
+use std::convert::Infallible;
+use std::fmt::Display;
+use std::io::{BufRead, Error as IoError};
 use tracing::{debug, error};
 use warp::filters::trace;
-use warp::http::header::{HeaderValue, CONTENT_TYPE};
 use warp::http::{Method, Response, StatusCode};
 use warp::path::FullPath;
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
-
-use self::MetricsConfig::{Borrowed, Owned};
 
 lazy_static! {
     static ref HTTP_STATUS_COUNTER: IntCounterVec = register_int_counter_vec!(
@@ -31,127 +28,142 @@ lazy_static! {
     .unwrap();
 }
 
-enum MetricsConfig {
+pub(super) enum MetricsConfig {
     Borrowed(&'static str),
     Owned(FullPath),
 }
 
 impl MetricsConfig {
-    fn new(config: &'static str, path: FullPath) -> MetricsConfig {
-        match config {
-            "" => Owned(path),
-            config => Borrowed(config),
-        }
+    pub(super) fn new(
+        config: &'static str,
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + 'static {
+        warp::any().map(move || MetricsConfig::Borrowed(config))
+    }
+
+    pub(super) fn path(
+    ) -> impl Filter<Extract = (MetricsConfig,), Error = Infallible> + Clone + Send + 'static {
+        warp::filters::path::full().map(MetricsConfig::Owned)
     }
 
     fn as_str(&self) -> &str {
-        match &self {
-            Borrowed(config) => config,
-            Owned(path) => path.as_str(),
+        match self {
+            Self::Borrowed(config) => config,
+            Self::Owned(path) => path.as_str(),
         }
     }
 }
 
-pub(super) trait MetricFn<R, I>: Fn(I) -> <Self as MetricFn<R, I>>::Output
+trait MetricsWrapper<I>: Fn(I) -> <Self as MetricsWrapper<I>>::Output
 where
-    R: Reply,
-    I: Filter<Extract = (R,), Error = Rejection>,
+    I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
 {
-    type Output: Filter<Extract = (WarpResponse,), Error = Rejection>
-        + Clone
-        + Send
-        + Sync
-        + 'static;
+    type Output: Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static;
 }
 
-impl<R, I, O, F> MetricFn<R, I> for F
+impl<F, I, O> MetricsWrapper<I> for F
 where
-    R: Reply,
-    I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
-    O: Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + Sync + 'static,
     F: Fn(I) -> O,
+    I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
+    O: Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static,
 {
     type Output = O;
 }
 
-fn stop_metrics(
-    config: MetricsConfig,
-    method: Method,
-    mut timer: HistogramTimerWrapper,
-    res: impl Reply,
-) -> WarpResponse {
-    let res = res.into_response();
-
-    HTTP_STATUS_COUNTER
-        .with_label_values(&[config.as_str(), method.as_str(), res.status().as_str()])
-        .inc();
-
-    if let Some(timer) = timer.take() {
-        let time = timer.stop_and_record() * 1000f64;
-        debug!("request took {}ms", time);
-    }
-
-    res
-}
-
-pub(super) fn metrics_wrapper<R, I, C>(config: C) -> impl MetricFn<R, I>
+fn hihi<I>(
+    http_req_histogram: &'static HistogramVec,
+    http_status_counter: &'static IntCounterVec,
+) -> impl MetricsWrapper<I>
 where
-    R: Reply + 'static,
-    I: Filter<Extract = (R,), Error = Rejection> + Clone + Send + Sync + 'static,
-    C: Into<Option<&'static str>>,
+    I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
 {
-    let config = match config.into() {
-        Some("") => panic!("Empty str not allowed as param"),
-        Some(config) => config,
-        None => "",
-    };
-
     move |filter: I| {
-        warp::filters::path::full()
-            .and(warp::filters::method::method())
-            .map(move |path: FullPath, method: Method| {
-                let config = MetricsConfig::new(config, path);
-                let timer = HTTP_REQ_HISTOGRAM
-                    .with_label_values(&[config.as_str(), method.as_str()])
+        warp::filters::method::method()
+            .map(move |method| {
+                let timer = http_req_histogram
+                    .with_label_values(&["", ""])
                     .start_timer()
                     .into();
-
-                (config, method, timer)
+                (method, timer)
             })
             .untuple_one()
             .and(filter)
-            .map(stop_metrics)
-            .with(trace::request())
-            .map(Reply::into_response)
+            .map(
+                move |method: Method,
+                      mut timer: HistogramTimerWrapper,
+                      res: WarpResponse,
+                      config: MetricsConfig| {
+                    http_status_counter
+                        .with_label_values(&[
+                            config.as_str(),
+                            method.as_str(),
+                            res.status().as_str(),
+                        ])
+                        .inc();
+
+                    if let Some(timer) = timer.take() {
+                        let time = timer.stop_and_discard();
+
+                        http_req_histogram
+                            .with_label_values(&[config.as_str(), method.as_str()])
+                            .observe(time);
+
+                        debug!("request took {}ms", time * 1000f64);
+                    }
+
+                    res
+                },
+            )
     }
 }
 
-const TEXT_PLAIN_MIME: &str = "text/plain";
+pub(super) fn metrics_wrapper<F>(
+    filter: F,
+) -> impl Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static
+where
+    F: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
+{
+    hihi(&*HTTP_REQ_HISTOGRAM, &*HTTP_STATUS_COUNTER)(filter)
+}
+
+fn internal_server_error_and_trace<E: Display>(error: &E) -> WarpResponse {
+    error!("{}", error);
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(error.to_string())
+        .into_response()
+}
+
+fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
+    let mut res = String::with_capacity(data.len());
+    loop {
+        let len = match data.read_line(&mut res) {
+            Ok(0) => break Ok(res),
+            Ok(len) => len,
+            Err(e) => break Err(e),
+        };
+        if res.ends_with(" 0\n") {
+            res.truncate(res.len() - len);
+        }
+    }
+}
 
 // maybe this implementation is wrong as it removes bucket items aswell
-fn metrics_handler() -> impl Reply {
+// this method leaks internal errors so it should not be public
+fn metrics_handler() -> WarpResponse {
     let encoder = TextEncoder::new();
     let families = prometheus::gather();
+
     let mut res = vec![];
     if let Err(e) = encoder.encode(&families, &mut res) {
-        error!("{}", e);
-        return Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(e.to_string())
-            .into_response();
+        return internal_server_error_and_trace(&e);
     }
 
-    // we keep the error in the stream so it can later be handled by warp
-    let stream = Cursor::new(res).lines().filter_map(|line| match line {
-        Ok(line) if !line.ends_with(" 0") => Some(Ok(line + "\n")),
-        Err(error) => Some(Err(error)),
-        _ => None,
-    });
+    let res = match remove_zero_metrics(&res[..]) {
+        Ok(res) => res,
+        Err(e) => return internal_server_error_and_trace(&e),
+    };
 
-    Response::builder()
-        .header(CONTENT_TYPE, HeaderValue::from_static(TEXT_PLAIN_MIME))
-        .body(Body::wrap_stream(stream::iter(stream)))
-        .into_response()
+    Response::new(res).into_response()
 }
 
 const METRICS_PATH: &str = "metrics";
@@ -161,7 +173,9 @@ pub(super) fn metrics(
     warp::path(METRICS_PATH)
         .and(warp::get())
         .map(metrics_handler)
-        .with(warp::wrap_fn(metrics_wrapper(None)))
+        .and(MetricsConfig::path())
+        .with(warp::wrap_fn(metrics_wrapper))
+        .with(trace::request())
 }
 
 // Changes the default behaviour of HistogramTimer so it doesn't record the value if it is being dropped

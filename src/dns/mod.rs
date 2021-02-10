@@ -1,8 +1,7 @@
 use anyhow::Result;
-use std::future::Future;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tracing::field::{debug, Empty};
-use tracing::{info_span, Instrument, Span};
+use tracing::{info_span, Span};
 use trust_dns_server::authority::{AuthorityObject, Catalog};
 use trust_dns_server::proto::rr::Name;
 use trust_dns_server::ServerFuture;
@@ -32,17 +31,14 @@ impl<A: ToSocketAddrs> DNS<A> {
         DNS { server, addr, span }
     }
 
-    pub fn spawn(mut self) -> impl Future<Output = Result<()>> {
-        let span = self.span.clone();
-        async move {
-            let udp = UdpSocket::bind(self.addr).await?;
-            self.span.record("local.addr", &debug(udp.local_addr()));
-            self.server.register_socket(udp);
+    #[tracing::instrument(skip(self))]
+    pub async fn spawn(mut self) -> Result<()> {
+        let udp = UdpSocket::bind(self.addr).await?;
+        self.span.record("local.addr", &debug(udp.local_addr()));
+        self.server.register_socket(udp);
 
-            tokio::spawn(self.server.block_until_done()).await??;
+        tokio::spawn(self.server.block_until_done()).await??;
 
-            Ok(())
-        }
-        .instrument(span)
+        Ok(())
     }
 }

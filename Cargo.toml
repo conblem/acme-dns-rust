@@ -20,25 +20,28 @@ prometheus = "0.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
 tracing-futures = { version = "0.2", features = ["futures-03"] }
-#sqlx = { version = "0.4.1", default-features = false, features = [ "runtime-tokio-rustls", "macros", "migrate"] }
-sqlx = { version = "0.4.2", git = "https://github.com/lumeohq/sqlx", branch = "tokio-1.0", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
+sqlx = { version = "0.5", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "net", "signal", "macros"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = "0.6"
 tokio-rustls = "0.22"
 uuid = { version = "0.8", features = ["v4"] }
 bcrypt = "0.9"
-#warp = { version = "0.2.5", default-features = false }
-warp = { version = "0.2.5", git = "https://github.com/aknuds1/warp", branch = "chore/upgrade-tokio", default-features = false }
+warp = { version = "0.3", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 acme-lib = "0.8"
-trust-dns-server = "0.20"
-trust-dns-client = "0.20"
+trust-dns-server = { version = "0.20", features = ["resolver", "dns-over-rustls", "dns-over-https-rustls"] }
 parking_lot = "0.11"
 futures-util = "0.3"
 rustls = "0.19"
 toml = "0.5"
 anyhow = "1.0"
 ppp = "1.2"
+
+[dev-dependencies]
+serde_test = "1.0"
+tracing-test = "0.1"
+tokio-test = "0.4"
 
 [features]
 default = ["postgres"]
