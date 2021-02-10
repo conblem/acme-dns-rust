@@ -102,3 +102,15 @@ impl Acceptor {
         Ok(TlsAcceptor::from(server_config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+    use tokio::io::split;
+
+    #[tokio::test]
+    async fn test() {
+        let (_client_read, _server_write) = split(Cursor::new(vec![]));
+        let (_server_read, _client_write) = split(Cursor::new(vec![]));
+    }
+}
