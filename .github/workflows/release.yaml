@@ -23,7 +23,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         with:
           crate: semantic-release-rust
-          version: 1.0.0-alpha.6
+          version: 1.0.0-alpha.8
       - uses: bahmutov/npm-install@v1
       - run: npm ci
       - name: Release
