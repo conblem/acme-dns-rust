@@ -66,9 +66,10 @@ pub fn load_config(config_path: Option<String>) -> Result<Config> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_config;
     use std::path::Path;
     use tracing_test::traced_test;
+
+    use super::load_config;
 
     #[test]
     #[traced_test]
