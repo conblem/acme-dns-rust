@@ -14,14 +14,13 @@ use acme::DatabasePersist;
 use cert::CertManager;
 use dns::{DatabaseAuthority, DNS};
 
-#[macro_use]
-mod util;
 mod acme;
 mod api;
 mod cert;
 mod config;
 mod dns;
 mod domain;
+mod util;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 

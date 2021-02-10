@@ -105,12 +105,30 @@ impl Acceptor {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-    use tokio::io::split;
+    use rustls::{ClientConfig, NoClientAuth, ServerConfig};
+    use std::sync::Arc;
+    use tokio_rustls::webpki::DNSNameRef;
+    use tokio_rustls::{TlsAcceptor, TlsConnector};
 
     #[tokio::test]
     async fn test() {
-        let (_client_read, _server_write) = split(Cursor::new(vec![]));
-        let (_server_read, _client_write) = split(Cursor::new(vec![]));
+        let (client, server) = tokio::io::duplex(64);
+
+        let server_future = tokio::spawn(async move {
+            let server_config = ServerConfig::new(NoClientAuth::new());
+            let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+            acceptor.accept(server).await.unwrap();
+        });
+
+        let client_future = tokio::spawn(async move {
+            let client_config = Arc::new(ClientConfig::new());
+            let connector = TlsConnector::from(client_config);
+
+            let domain = DNSNameRef::try_from_ascii_str("google.com").unwrap();
+            connector.connect(domain, client).await.unwrap();
+        });
+
+        tokio::try_join!(client_future, server_future).unwrap();
     }
 }

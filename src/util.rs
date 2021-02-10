@@ -32,54 +32,12 @@ pub(crate) fn uuid() -> String {
     Uuid::new_v4().to_simple().to_string()
 }
 
-macro_rules! delegate_async_write {
-    ($item:ident) => {
-        fn poll_write(
-            mut self: ::std::pin::Pin<&mut Self>,
-            cx: &mut ::std::task::Context<'_>,
-            buf: &[::std::primitive::u8],
-        ) -> ::std::task::Poll<::std::io::Result<usize>> {
-            ::std::pin::Pin::new(&mut self.$item).poll_write(cx, buf)
-        }
-
-        fn poll_flush(
-            mut self: ::std::pin::Pin<&mut Self>,
-            cx: &mut ::std::task::Context<'_>,
-        ) -> ::std::task::Poll<::std::io::Result<()>> {
-            ::std::pin::Pin::new(&mut self.$item).poll_flush(cx)
-        }
-
-        fn poll_shutdown(
-            mut self: ::std::pin::Pin<&mut Self>,
-            cx: &mut ::std::task::Context<'_>,
-        ) -> ::std::task::Poll<::std::io::Result<()>> {
-            ::std::pin::Pin::new(&mut self.$item).poll_shutdown(cx)
-        }
-
-        fn poll_write_vectored(
-            mut self: ::std::pin::Pin<&mut Self>,
-            cx: &mut ::std::task::Context<'_>,
-            bufs: &[::std::io::IoSlice<'_>],
-        ) -> ::std::task::Poll<::std::io::Result<::std::primitive::usize>> {
-            ::std::pin::Pin::new(&mut self.$item).poll_write_vectored(cx, bufs)
-        }
-
-        fn is_write_vectored(&self) -> ::std::primitive::bool {
-            self.$item.is_write_vectored()
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
-    use futures_util::future;
-    use std::io::{Error as IoError, ErrorKind, IoSlice};
-    use std::pin::Pin;
+    use std::io::{Error as IoError, ErrorKind};
     use std::thread;
     use std::time::Duration;
-    use tokio::io::{AsyncWrite, AsyncWriteExt};
-    use tokio_test::io::Builder;
 
     use super::{error, now, to_i64, to_u64, uuid};
 
@@ -144,40 +102,5 @@ mod tests {
         // here we access the actual inner error
         let actual = actual.into_inner().expect("Error has no inner error");
         assert_eq!(format!("{}", expected), format!("{}", actual));
-    }
-
-    struct Wrapper<T> {
-        inner: T,
-    }
-
-    impl<T: AsyncWrite + Unpin> AsyncWrite for Wrapper<T> {
-        delegate_async_write!(inner);
-    }
-
-    #[tokio::test]
-    async fn delegate_async_write_works() {
-        let mut builder = Builder::new();
-        builder.write("Test1".as_ref());
-        builder.write("Test2".as_ref());
-
-        let mut stream = Wrapper {
-            inner: builder.build(),
-        };
-        assert_eq!(false, stream.is_write_vectored());
-
-        stream.write_all("Test1".as_ref()).await.unwrap();
-
-        let slice = IoSlice::new("Test2".as_ref());
-        let size =
-            future::poll_fn(move |cx| Pin::new(&mut stream).poll_write_vectored(cx, &[slice]))
-                .await
-                .unwrap();
-        assert_eq!(5, size);
-
-        let mut stream = Wrapper {
-            inner: Builder::new().build(),
-        };
-        assert_eq!((), stream.flush().await.unwrap());
-        assert_eq!((), stream.shutdown().await.unwrap());
     }
 }

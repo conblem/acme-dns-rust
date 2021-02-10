@@ -3,6 +3,7 @@ use futures_util::{ready, TryStreamExt};
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
+use std::io::IoSlice;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -119,7 +120,33 @@ impl<T> AsyncWrite for ProxyStream<T>
 where
     T: AsyncWrite + Unpin,
 {
-    delegate_async_write!(stream);
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<IoResult<usize>> {
+        Pin::new(&mut self.stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<IoResult<usize>> {
+        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
+    }
 }
 
 struct RealAddrFuture<'a, T> {
@@ -212,10 +239,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use futures_util::future;
     use ppp::model::{Addresses, Command, Header, Protocol, Version};
-    use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+    use std::io::{Error as IoError, ErrorKind, IoSlice, Result as IoResult};
     use std::net::SocketAddr;
-    use tokio::io::AsyncReadExt;
+    use std::pin::Pin;
+    use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use tokio_test::io::Builder;
 
     use super::{format_header, RemoteAddr, ToProxyStream};
@@ -324,5 +353,29 @@ mod tests {
         let proxy_stream = &mut &[].source(ProxyProtocol::Enabled);
         let actual = proxy_stream.remote_addr().unwrap();
         assert_eq!(SocketAddr::from(([1, 1, 1, 1], 443)), actual)
+    }
+
+    #[tokio::test]
+    async fn test_async_write_delegation() {
+        let mut builder = Builder::new();
+        builder.write("Test1".as_ref());
+        builder.write("Test2".as_ref());
+
+        let mut proxy_stream = builder.build().source(ProxyProtocol::Disabled);
+        assert_eq!(false, proxy_stream.is_write_vectored());
+
+        proxy_stream.write_all("Test1".as_ref()).await.unwrap();
+
+        let slice = IoSlice::new("Test2".as_ref());
+        let size = future::poll_fn(move |cx| {
+            Pin::new(&mut proxy_stream).poll_write_vectored(cx, &[slice])
+        })
+        .await
+        .unwrap();
+        assert_eq!(5, size);
+
+        let mut proxy_stream = Builder::new().build().source(ProxyProtocol::Disabled);
+        assert_eq!((), proxy_stream.flush().await.unwrap());
+        assert_eq!((), proxy_stream.shutdown().await.unwrap());
     }
 }
