@@ -276,7 +276,7 @@ mod tests {
         let mut header = ppp::to_bytes(generate_ipv4()).unwrap();
         header.extend_from_slice("Test".as_ref());
 
-        let proxy_stream = &mut &mut header[..].source(ProxyProtocol::Enabled);
+        let proxy_stream = &mut &mut header.source(ProxyProtocol::Enabled);
 
         let actual = proxy_stream.real_addr().await.unwrap().unwrap();
 
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn test_failure() {
         let invalid = Vec::from("invalid header");
-        let invalid = &mut &mut invalid[..].source(ProxyProtocol::Enabled);
+        let invalid = &mut &mut invalid.source(ProxyProtocol::Enabled);
 
         let actual = invalid.real_addr().await.unwrap_err();
         assert_eq!(format!("{}", actual), "Proxy Parser Error");

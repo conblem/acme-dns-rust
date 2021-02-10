@@ -149,7 +149,7 @@ mod tests {
         #[serde(deserialize_with = "deserialize")] PreconfiguredRecords,
     );
 
-    fn _a_record_tokens() -> [Token; 8] {
+    fn a_record_tokens() -> [Token; 8] {
         [
             Token::BorrowedStr("acme.example.com"),
             Token::Map { len: Some(1) },
@@ -162,7 +162,7 @@ mod tests {
         ]
     }
 
-    fn _cname_record_tokens() -> [Token; 8] {
+    fn cname_record_tokens() -> [Token; 8] {
         [
             Token::BorrowedStr("acme.example.com"),
             Token::Map { len: Some(1) },
@@ -175,7 +175,7 @@ mod tests {
         ]
     }
 
-    fn _txt_record_tokens() -> [Token; 8] {
+    fn txt_record_tokens() -> [Token; 8] {
         [
             Token::BorrowedStr("acme.example.com"),
             Token::Map { len: Some(1) },
@@ -189,7 +189,9 @@ mod tests {
     }
 
     // todo: renable this test
-    fn _deserialize_test() {
+    #[test]
+    #[ignore]
+    fn deserialize_test() {
         let records = Default::default();
         let records = PreconfiguredRecordsWrapper(records);
 
@@ -200,9 +202,9 @@ mod tests {
             },
             Token::Map { len: Some(1) },
         ];
-        records_token.extend_from_slice(&_a_record_tokens());
-        records_token.extend_from_slice(&_cname_record_tokens());
-        records_token.extend_from_slice(&_txt_record_tokens());
+        records_token.extend_from_slice(&a_record_tokens());
+        records_token.extend_from_slice(&cname_record_tokens());
+        records_token.extend_from_slice(&txt_record_tokens());
         records_token.push(Token::MapEnd);
 
         assert_de_tokens(&records, &records_token)
