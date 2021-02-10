@@ -73,10 +73,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            !*.gcno
-            !*.gcda
-            !*.gcov
-          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+            !**/*.gcno
+            !**/*.gcda
+            !**/*.gcov
+          key: ${{ runner.os }}-coverage-1-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/cargo@v1
         with:
           command: test
