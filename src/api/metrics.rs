@@ -53,6 +53,7 @@ impl MetricsConfig {
     }
 }
 
+// type magic to return a closure which returns a unable warp filter
 trait MetricsWrapper<I>: Fn(I) -> <Self as MetricsWrapper<I>>::Output
 where
     I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
@@ -69,8 +70,7 @@ where
     type Output = O;
 }
 
-//todo: fix this
-fn hihi<I>(
+fn metrics_wrapper_higher<I>(
     http_req_histogram: &'static HistogramVec,
     http_status_counter: &'static IntCounterVec,
 ) -> impl MetricsWrapper<I>
@@ -123,7 +123,7 @@ pub(crate) fn metrics_wrapper<F>(
 where
     F: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
 {
-    hihi(&*HTTP_REQ_HISTOGRAM, &*HTTP_STATUS_COUNTER)(filter)
+    metrics_wrapper_higher(&*HTTP_REQ_HISTOGRAM, &*HTTP_STATUS_COUNTER)(filter)
 }
 
 fn internal_server_error_and_trace<E: Display>(error: &E) -> WarpResponse {
@@ -179,7 +179,10 @@ pub(crate) fn metrics(
         .with(trace::request())
 }
 
+// todo: think about if this is still the right abstraction
+// because the metrics now get applied over all routes
 // Changes the default behaviour of HistogramTimer so it doesn't record the value if it is being dropped
+// this value can get dropped if warp rejects the request
 struct HistogramTimerWrapper(Option<HistogramTimer>);
 
 impl From<HistogramTimer> for HistogramTimerWrapper {

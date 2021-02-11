@@ -13,6 +13,26 @@ use tracing::{error, info};
 use crate::facade::{Cert, CertFacade};
 use crate::util::to_u64;
 
+pub fn wrap<L, I, S, F>(
+    listener: L,
+    facade: F,
+) -> impl Stream<
+    Item = Result<
+        impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>,
+    >,
+> + Send
+where
+    L: Stream<Item = IoResult<I>> + Send + 'static,
+    I: Future<Output = IoResult<S>> + Send + 'static,
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    F: CertFacade + Send + Sync + 'static,
+{
+    wrap_higher(listener, acceptor(facade))
+}
+
+// we use a closure which returns a future as an abstraction
+// for the acceptor to remove the need for a trait, so there
+// is no boxing needed
 pub fn wrap_higher<L, I, S, A, F>(
     listener: L,
     acceptor: A,
@@ -38,24 +58,7 @@ where
         })
 }
 
-pub fn wrap<L, I, S, F>(
-    listener: L,
-    facade: F,
-) -> impl Stream<
-    Item = Result<
-        impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>,
-    >,
-> + Send
-where
-    L: Stream<Item = IoResult<I>> + Send + 'static,
-    I: Future<Output = IoResult<S>> + Send + 'static,
-    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    F: CertFacade + Send + Sync + 'static,
-{
-    let acceptor = acceptor(facade);
-    wrap_higher(listener, acceptor)
-}
-
+// used for expressing a closure with an impl return
 trait Func: Fn() -> <Self as Func>::Output {
     type Output;
 }
@@ -67,6 +70,8 @@ where
     type Output = O;
 }
 
+// Func trait is only used here as it inherits Fn
+// we just use the Fn trait for input arguments
 fn acceptor<F>(
     facade: F,
 ) -> impl Func<Output = impl Future<Output = Result<TlsAcceptor>>> + Clone + 'static
@@ -78,6 +83,7 @@ where
     let config = RwLock::new((None, Arc::new(server_config)));
     let wrapper = Arc::new((facade, config));
 
+    // workarround to make closure Fn instead of FnOnce
     move || {
         let wrapper = Arc::clone(&wrapper);
         async move {
@@ -94,10 +100,14 @@ async fn load_cert<F>(
 where
     F: CertFacade + 'static,
 {
+    // get current certificate from database
     let new_cert = facade.first_cert().await;
 
     let db_cert = match (new_cert, &*config.read()) {
+        // if the current cert is not the same as we have cached
+        // create a new server config
         (Ok(Some(new_cert)), (cert, _)) if Some(&new_cert) != cert.as_ref() => new_cert,
+        // reuse existing server config because cached cert is already the newest
         (_, (_, server_config)) => {
             info!("Using existing TLS Config");
             return Ok(TlsAcceptor::from(Arc::clone(server_config)));
@@ -107,6 +117,9 @@ where
 
     let server_config = match create_server_config(&db_cert) {
         Ok(server_config) => server_config,
+        // todo: think about if we should return old cert
+        // in case of error also reuse the old server config
+        // maybe an old expired certificate
         Err(e) => {
             error!("{}", e);
             let (_, server_config) = &*config.read();
@@ -114,6 +127,7 @@ where
         }
     };
 
+    // cache cert for future comparison together with server config
     *config.write() = (Some(db_cert), Arc::clone(&server_config));
     info!("Created new TLS config");
     Ok(TlsAcceptor::from(server_config))
@@ -135,6 +149,7 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
 
     let mut config = ServerConfig::new(NoClientAuth::new());
     config.set_single_cert(cert, private)?;
+    // used to enable http2 support
     config.set_protocols(&["h2".into(), "http/1.1".into()]);
 
     Ok(Arc::new(config))
