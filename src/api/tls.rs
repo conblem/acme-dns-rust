@@ -39,6 +39,27 @@ where
         })
 }
 
+trait Func: Fn() -> <Self as Func>::Output {
+    type Output;
+}
+
+impl<F, O> Func for F
+where
+    F: Fn() -> O,
+{
+    type Output = O;
+}
+
+fn _test<F: CertFacade>(_facade: F) -> impl Func<Output = impl Future<Output = ()>> + Clone {
+    let test = Arc::new("Hallo".to_owned());
+    move || {
+        let test_two = Arc::clone(&test);
+        async move {
+            println!("{}", test_two);
+        }
+    }
+}
+
 struct Acceptor<F> {
     facade: F,
     config: RwLock<(Option<Cert>, Arc<ServerConfig>)>,
