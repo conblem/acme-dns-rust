@@ -2,9 +2,9 @@ use anyhow::{Error, Result};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use serde::{Deserialize, Serialize};
-use sqlx::{Executor, Postgres};
+use sqlx::{Database, Executor, Postgres};
 
-use super::PostgresFacade;
+use super::DatabaseFacade;
 use crate::util::uuid;
 
 #[derive(Debug, Serialize, Clone)]
@@ -66,23 +66,36 @@ pub trait DomainFacade {
     async fn update_domain(&self, domain: &Domain) -> Result<(), sqlx::Error>;
 }
 
-pub(super) async fn create_domain<'a, E: Executor<'a, Database = Postgres>>(
-    executor: E,
-    domain: &Domain,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO domain (id, username, password, txt) VALUES ($1, $2, $3, $4)")
-        .bind(&domain.id)
-        .bind(&domain.username)
-        .bind(&domain.password)
-        .bind(&domain.txt)
-        .execute(executor)
-        .await?;
-
-    Ok(())
+#[async_trait]
+pub(super) trait DomainFacadeInternal<DB: Database> {
+    async fn create_domain<'a, E: Executor<'a, Database = DB>>(
+        &self,
+        executor: E,
+        domain: &Domain,
+    ) -> Result<(), sqlx::Error>;
 }
 
 #[async_trait]
-impl DomainFacade for PostgresFacade {
+impl DomainFacadeInternal<Postgres> for DatabaseFacade<Postgres> {
+    async fn create_domain<'a, E: Executor<'a, Database = Postgres>>(
+        &self,
+        executor: E,
+        domain: &Domain,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO domain (id, username, password, txt) VALUES ($1, $2, $3, $4)")
+            .bind(&domain.id)
+            .bind(&domain.username)
+            .bind(&domain.password)
+            .bind(&domain.txt)
+            .execute(executor)
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl DomainFacade for DatabaseFacade<Postgres> {
     async fn find_domain_by_id(&self, id: &str) -> Result<Option<Domain>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM domain WHERE id = $1 LIMIT 1")
             .bind(id)
@@ -91,7 +104,7 @@ impl DomainFacade for PostgresFacade {
     }
 
     async fn create_domain(&self, domain: &Domain) -> Result<(), sqlx::Error> {
-        create_domain(&self.pool, domain).await
+        DomainFacadeInternal::create_domain(self, &self.pool, domain).await
     }
 
     async fn update_domain(&self, domain: &Domain) -> Result<(), sqlx::Error> {

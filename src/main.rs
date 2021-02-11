@@ -10,7 +10,7 @@ use tokio::runtime::Runtime;
 use tokio::signal::ctrl_c;
 use tracing::{debug, error, info, Instrument};
 
-use crate::facade::PostgresFacade;
+use crate::facade::DatabaseFacade;
 use acme::DatabasePersist;
 use cert::CertManager;
 use dns::{DatabaseAuthority, DNS};
@@ -48,7 +48,7 @@ fn run() -> Result<()> {
         debug!("Running in runtime");
 
         let pool = setup_database(&config.general.db).await?;
-        let facade = PostgresFacade::from(pool.clone());
+        let facade = DatabaseFacade::from(pool.clone());
         let authority =
             DatabaseAuthority::new(facade.clone(), &config.general.name, config.records);
         let dns = DNS::new(&config.general.dns, authority);

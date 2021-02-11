@@ -105,24 +105,47 @@ impl<F: CertFacade> Acceptor<F> {
 
 #[cfg(test)]
 mod tests {
-    use rustls::{ClientConfig, NoClientAuth, ServerConfig};
+    use futures_util::{future, stream, StreamExt};
+    use rustls::{
+        Certificate, ClientConfig, RootCertStore, ServerCertVerified, ServerCertVerifier, TLSError,
+    };
     use std::sync::Arc;
     use tokio_rustls::webpki::DNSNameRef;
-    use tokio_rustls::{TlsAcceptor, TlsConnector};
+    use tokio_rustls::TlsConnector;
+
+    use super::wrap;
+    use crate::facade::TestFacade;
 
     async fn _test() {
         let (client, server) = tokio::io::duplex(64);
+        let server = stream::once(future::ready(Ok(future::ready(Ok(server)))));
+        let mut acceptor = wrap(server, TestFacade::default());
 
         let server_future = tokio::spawn(async move {
-            let server_config = ServerConfig::new(NoClientAuth::new());
-            let acceptor = TlsAcceptor::from(Arc::new(server_config));
-
-            acceptor.accept(server).await.unwrap();
+            acceptor.next().await.unwrap().unwrap().await.unwrap();
         });
 
+        struct TestVerifier;
+        impl ServerCertVerifier for TestVerifier {
+            fn verify_server_cert(
+                &self,
+                _roots: &RootCertStore,
+                presented_certs: &[Certificate],
+                _dns_name: DNSNameRef<'_>,
+                _ocsp_response: &[u8],
+            ) -> Result<ServerCertVerified, TLSError> {
+                println!("{:?}", presented_certs);
+                Ok(ServerCertVerified::assertion())
+            }
+        }
+
         let client_future = tokio::spawn(async move {
-            let client_config = Arc::new(ClientConfig::new());
-            let connector = TlsConnector::from(client_config);
+            let mut client_config = ClientConfig::new();
+            client_config
+                .dangerous()
+                .set_certificate_verifier(Arc::new(TestVerifier {}));
+
+            let connector = TlsConnector::from(Arc::new(client_config));
 
             let domain = DNSNameRef::try_from_ascii_str("google.com").unwrap();
             connector.connect(domain, client).await.unwrap();
