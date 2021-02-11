@@ -28,7 +28,7 @@ lazy_static! {
     .unwrap();
 }
 
-pub(super) enum MetricsConfig {
+pub(crate) enum MetricsConfig {
     Borrowed(&'static str),
     Owned(FullPath),
 }
@@ -69,6 +69,7 @@ where
     type Output = O;
 }
 
+//todo: fix this
 fn hihi<I>(
     http_req_histogram: &'static HistogramVec,
     http_status_counter: &'static IntCounterVec,
@@ -116,7 +117,7 @@ where
     }
 }
 
-pub(super) fn metrics_wrapper<F>(
+pub(crate) fn metrics_wrapper<F>(
     filter: F,
 ) -> impl Filter<Extract = (WarpResponse,), Error = Rejection> + Clone + Send + 'static
 where
@@ -168,7 +169,7 @@ fn metrics_handler() -> WarpResponse {
 
 const METRICS_PATH: &str = "metrics";
 
-pub(super) fn metrics(
+pub(crate) fn metrics(
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {
     warp::path(METRICS_PATH)
         .and(warp::get())

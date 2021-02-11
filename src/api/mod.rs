@@ -20,7 +20,7 @@ use crate::facade::{CertFacade, DomainFacade};
 mod metrics;
 mod proxy;
 mod routes;
-mod tls;
+pub mod tls;
 
 lazy_static! {
     static ref TCP_TOTAL_CONNECTION_COUNTER: IntCounterVec = register_int_counter_vec!(
@@ -81,7 +81,7 @@ where
     }
 }
 
-pub async fn new<F>(
+pub(crate) async fn new<F>(
     (http, http_proxy): Listener,
     (https, https_proxy): Listener,
     (prom, prom_proxy): Listener,

@@ -50,7 +50,7 @@ async fn update_handler<F>(
 const REGISTER_PATH: &str = "register";
 const UPDATE_PATH: &str = "update";
 
-pub(super) fn routes<F>(
+pub(crate) fn routes<F>(
     facade: F,
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static
 where

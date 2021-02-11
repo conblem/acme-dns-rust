@@ -6,7 +6,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use super::domain::{Domain, DomainFacadeInternal};
-use super::DatabaseFacade;
+use super::{DatabaseFacade, InMemoryFacade};
 use crate::util::{now, to_i64, HOUR};
 
 #[derive(sqlx::Type, Debug, PartialEq, Clone)]
@@ -18,9 +18,9 @@ pub enum State {
 
 #[derive(FromRow, Debug, Clone)]
 pub struct Cert {
-    pub(crate) id: String,
-    pub(crate) update: i64,
-    pub(crate) state: State,
+    pub id: String,
+    pub update: i64,
+    pub state: State,
     pub cert: Option<String>,
     pub private: Option<String>,
     #[sqlx(rename = "domain_id")]
@@ -194,40 +194,31 @@ impl CertFacade for DatabaseFacade<Postgres> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use anyhow::Result;
-    use async_trait::async_trait;
+#[async_trait]
+impl CertFacade for InMemoryFacade {
+    async fn first_cert(&self) -> Result<Option<Cert>, sqlx::Error> {
+        let certs = self.certs.lock();
+        Ok(certs.values().next().map(Clone::clone))
+    }
 
-    use super::super::tests::TestFacade;
-    use super::{Cert, CertFacade};
+    async fn update_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
+        let mut certs = self.certs.lock();
+        *certs.get_mut(&cert.id).unwrap() = cert.clone();
 
-    #[async_trait]
-    impl CertFacade for TestFacade {
-        async fn first_cert(&self) -> Result<Option<Cert>, sqlx::Error> {
-            let certs = self.certs.lock();
-            Ok(certs.values().next().map(Clone::clone))
-        }
+        Ok(())
+    }
 
-        async fn update_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-            let mut certs = self.certs.lock();
-            *certs.get_mut(&cert.id).unwrap() = cert.clone();
+    async fn create_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
+        self.certs.lock().insert(cert.id.clone(), cert.clone());
 
-            Ok(())
-        }
+        Ok(())
+    }
 
-        async fn create_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-            self.certs.lock().insert(cert.id.clone(), cert.clone());
+    async fn start_cert(&self) -> Result<Option<Cert>> {
+        unimplemented!()
+    }
 
-            Ok(())
-        }
-
-        async fn start_cert(&self) -> Result<Option<Cert>> {
-            unimplemented!()
-        }
-
-        async fn stop_cert(&self, _memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
-            unimplemented!()
-        }
+    async fn stop_cert(&self, _memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
+        unimplemented!()
     }
 }

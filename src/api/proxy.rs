@@ -32,7 +32,7 @@ impl<T: RemoteAddr> RemoteAddr for ProxyStream<T> {
     }
 }
 
-pub(super) fn wrap(
+pub(crate) fn wrap(
     listener: TcpListener,
     proxy: ProxyProtocol,
 ) -> impl Stream<
@@ -84,7 +84,7 @@ where
     }
 }
 
-pub(super) struct ProxyStream<T> {
+struct ProxyStream<T> {
     stream: T,
     data: Option<Vec<u8>>,
     start_of_data: usize,

@@ -3,15 +3,15 @@ use std::io::{Error as IoError, ErrorKind};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub(crate) const fn to_i64(val: &u64) -> i64 {
+pub const fn to_i64(val: &u64) -> i64 {
     i64::from_ne_bytes(val.to_ne_bytes())
 }
-pub(crate) const fn to_u64(val: &i64) -> u64 {
+pub const fn to_u64(val: &i64) -> u64 {
     u64::from_ne_bytes(val.to_ne_bytes())
 }
 
 pub(crate) const HOUR: u64 = 3600;
-pub(crate) fn now() -> u64 {
+pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("unix epoch is safe")
