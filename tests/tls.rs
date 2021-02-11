@@ -2,8 +2,6 @@ use futures_util::{future, stream, StreamExt};
 use rustls::{
     Certificate, ClientConfig, RootCertStore, ServerCertVerified, ServerCertVerifier, TLSError,
 };
-use std::fs::read_to_string;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -35,15 +33,12 @@ impl ServerCertVerifier for TestVerifier {
 
 #[tokio::test]
 async fn test() {
-    let cert = read_to_string(Path::new(file!()).with_file_name("cert.crt"));
-    let private = read_to_string(Path::new(file!()).with_file_name("key.key"));
-
     let cert = Cert {
         id: "1".to_owned(),
         update: to_i64(&now()),
         state: State::Ok,
-        cert: Some(cert.unwrap()),
-        private: Some(private.unwrap()),
+        cert: Some(include_str!("./cert.crt").to_owned()),
+        private: Some(include_str!("./key.key").to_owned()),
         domain: "acme-dns-rust.com".to_owned(),
     };
 

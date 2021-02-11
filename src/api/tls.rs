@@ -136,14 +136,15 @@ where
 fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
     let (private, cert) = match (&db_cert.private, &db_cert.cert) {
         (Some(private), Some(cert)) => (private, cert),
-        _ => return Err(anyhow!("Cert has no Cert or Private")),
+        // safe to print because cert doesnt have private and cert
+        _ => return Err(anyhow!("{:?} has no Cert or Private", db_cert)),
     };
 
-    let mut privates = pkcs8_private_keys(&mut private.as_bytes())
-        .map_err(|_| anyhow!("Private is invalid {:?}", private))?;
+    let mut privates =
+        pkcs8_private_keys(&mut private.as_bytes()).map_err(|_| anyhow!("Private is invalid"))?;
     let private = privates
         .pop()
-        .ok_or_else(|| anyhow!("Private Vec is empty {:?}", privates))?;
+        .ok_or_else(|| anyhow!("Private Vec is empty"))?;
 
     let cert = certs(&mut cert.as_bytes()).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
 
@@ -153,4 +154,69 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
     config.set_protocols(&["h2".into(), "http/1.1".into()]);
 
     Ok(Arc::new(config))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_server_config;
+    use crate::facade::{Cert, State};
+    use crate::util::{now, to_i64};
+
+    fn create_cert() -> Cert {
+        Cert {
+            id: "1".to_owned(),
+            update: to_i64(&now()),
+            state: State::Ok,
+            cert: Some(include_str!("../../tests/cert.crt").to_owned()),
+            private: Some(include_str!("../../tests/key.key").to_owned()),
+            domain: "acme-dns-rust.com".to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_create_server_config_alpn() {
+        let cert = create_cert();
+        let config = create_server_config(&cert).unwrap();
+        let alpn = &config.alpn_protocols;
+        assert_eq!("h2".as_bytes(), &alpn[0]);
+        assert_eq!("http/1.1".as_bytes(), &alpn[1]);
+    }
+
+    #[test]
+    fn test_empty_cert() {
+        let mut cert = create_cert();
+        cert.cert = None;
+        cert.private = None;
+
+        let error = match create_server_config(&cert) {
+            Err(e) => format!("{}", e),
+            _ => unreachable!(),
+        };
+        assert!(error.contains(&format!("{:?}", cert)));
+        assert!(error.contains("has no Cert or Private"));
+    }
+
+    #[test]
+    fn test_invalid_private() {
+        let mut cert = create_cert();
+        *cert.private.as_mut().unwrap() = "WRONG".to_owned();
+
+        let error = match create_server_config(&cert) {
+            Err(e) => format!("{}", e),
+            _ => unreachable!(),
+        };
+        // unclear why the error gets no triggered earlier
+        assert!(error.contains("Private Vec is empty"));
+    }
+
+    // todo: fix
+    fn _test_invalid_cert() {
+        let mut cert = create_cert();
+        *cert.cert.as_mut().unwrap() = "WRONG".to_owned();
+
+        let _error = match create_server_config(&cert) {
+            Err(e) => format!("{}", e),
+            _ => unreachable!(),
+        };
+    }
 }
