@@ -2,9 +2,9 @@ use anyhow::{Error, Result};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use serde::{Deserialize, Serialize};
-use sqlx::{Database, Executor, Postgres};
+use sqlx::{Database, Executor, FromRow, Postgres};
 
-use super::DatabaseFacade;
+use super::{DatabaseFacade, InMemoryFacade, InMemoryFacadeGuard};
 use crate::util::uuid;
 
 #[derive(Debug, Serialize, Clone)]
@@ -24,7 +24,7 @@ impl Default for DomainDTO {
     }
 }
 
-#[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
+#[derive(FromRow, Debug, Serialize, Deserialize, Clone)]
 pub struct Domain {
     pub id: String,
     pub username: String,
@@ -67,7 +67,7 @@ pub trait DomainFacade {
 }
 
 #[async_trait]
-pub(super) trait DomainFacadeInternal<DB: Database> {
+pub(super) trait DomainFacadeDatabase<DB: Database> {
     async fn create_domain<'a, E: Executor<'a, Database = DB>>(
         &self,
         executor: E,
@@ -76,7 +76,7 @@ pub(super) trait DomainFacadeInternal<DB: Database> {
 }
 
 #[async_trait]
-impl DomainFacadeInternal<Postgres> for DatabaseFacade<Postgres> {
+impl DomainFacadeDatabase<Postgres> for DatabaseFacade<Postgres> {
     async fn create_domain<'a, E: Executor<'a, Database = Postgres>>(
         &self,
         executor: E,
@@ -104,7 +104,7 @@ impl DomainFacade for DatabaseFacade<Postgres> {
     }
 
     async fn create_domain(&self, domain: &Domain) -> Result<(), sqlx::Error> {
-        DomainFacadeInternal::create_domain(self, &self.pool, domain).await
+        DomainFacadeDatabase::create_domain(self, &self.pool, domain).await
     }
 
     async fn update_domain(&self, domain: &Domain) -> Result<(), sqlx::Error> {
@@ -115,6 +115,37 @@ impl DomainFacade for DatabaseFacade<Postgres> {
             .bind(&domain.id)
             .execute(&self.pool)
             .await?;
+
+        Ok(())
+    }
+}
+
+pub(super) trait DomainFacadeMemory {
+    fn create_domain(&self, lock: &mut InMemoryFacadeGuard<'_>, domain: &Domain) {
+        lock.domains.insert(domain.id.clone(), domain.clone());
+    }
+}
+
+impl DomainFacadeMemory for InMemoryFacade {}
+
+#[async_trait]
+impl DomainFacade for InMemoryFacade {
+    async fn find_domain_by_id(&self, id: &str) -> Result<Option<Domain>, sqlx::Error> {
+        let lock = self.0.lock();
+        let domain = lock.domains.get(&id.to_owned()).map(Clone::clone);
+        Ok(domain)
+    }
+
+    async fn create_domain(&self, domain: &Domain) -> Result<(), sqlx::Error> {
+        let mut lock = self.0.lock();
+        DomainFacadeMemory::create_domain(self, &mut lock, domain);
+
+        Ok(())
+    }
+
+    async fn update_domain(&self, domain: &Domain) -> Result<(), sqlx::Error> {
+        let mut lock = self.0.lock();
+        *lock.domains.get_mut(&domain.id).unwrap() = domain.clone();
 
         Ok(())
     }

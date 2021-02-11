@@ -1,13 +1,13 @@
+use parking_lot::{Mutex, MutexGuard};
 use sqlx::{Database, PgPool, Pool, Postgres};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 mod cert;
 mod domain;
 
 pub use cert::{Cert, CertFacade, State};
 pub use domain::{Domain, DomainDTO, DomainFacade};
-use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct DatabaseFacade<DB: Database> {
@@ -29,7 +29,12 @@ impl From<PgPool> for DatabaseFacade<Postgres> {
 }
 
 #[derive(Clone, Default)]
-pub struct InMemoryFacade {
-    certs: Arc<Mutex<HashMap<String, Cert>>>,
-    //domains: Mutex<HashMap<String, Domain>>,
+pub struct InMemoryFacade(Arc<Mutex<InMemoryFacadeInner>>);
+
+#[derive(Clone, Default)]
+struct InMemoryFacadeInner {
+    certs: HashMap<String, Cert>,
+    domains: HashMap<String, Domain>,
 }
+
+type InMemoryFacadeGuard<'a> = MutexGuard<'a, InMemoryFacadeInner>;

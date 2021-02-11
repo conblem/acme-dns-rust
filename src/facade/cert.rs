@@ -5,8 +5,8 @@ use sqlx::{Database, Executor, Postgres};
 use tracing::info;
 use uuid::Uuid;
 
-use super::domain::{Domain, DomainFacadeInternal};
-use super::{DatabaseFacade, InMemoryFacade};
+use super::domain::{DomainFacadeDatabase, DomainFacadeMemory};
+use super::{DatabaseFacade, Domain, InMemoryFacade, InMemoryFacadeGuard};
 use crate::util::{now, to_i64, HOUR};
 
 #[derive(sqlx::Type, Debug, PartialEq, Clone)]
@@ -57,7 +57,7 @@ pub trait CertFacade {
 }
 
 #[async_trait]
-trait CertFacadeInternal<DB: Database> {
+trait CertFacadeDatabase<DB: Database> {
     async fn first_cert<'a, E: Executor<'a, Database = DB>>(
         &self,
         executor: E,
@@ -77,7 +77,7 @@ trait CertFacadeInternal<DB: Database> {
 }
 
 #[async_trait]
-impl CertFacadeInternal<Postgres> for DatabaseFacade<Postgres> {
+impl CertFacadeDatabase<Postgres> for DatabaseFacade<Postgres> {
     async fn first_cert<'a, E: Executor<'a, Database = Postgres>>(
         &self,
         executor: E,
@@ -127,26 +127,26 @@ impl CertFacadeInternal<Postgres> for DatabaseFacade<Postgres> {
 #[async_trait]
 impl CertFacade for DatabaseFacade<Postgres> {
     async fn first_cert(&self) -> Result<Option<Cert>, sqlx::Error> {
-        CertFacadeInternal::first_cert(self, &self.pool).await
+        CertFacadeDatabase::first_cert(self, &self.pool).await
     }
 
     async fn update_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-        CertFacadeInternal::update_cert(self, &self.pool, cert).await
+        CertFacadeDatabase::update_cert(self, &self.pool, cert).await
     }
 
     async fn create_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-        CertFacadeInternal::create_cert(self, &self.pool, cert).await
+        CertFacadeDatabase::create_cert(self, &self.pool, cert).await
     }
 
     async fn start_cert(&self) -> Result<Option<Cert>> {
         let mut transaction = self.pool.begin().await?;
 
-        let cert = CertFacadeInternal::first_cert(self, &mut transaction).await?;
+        let cert = CertFacadeDatabase::first_cert(self, &mut transaction).await?;
 
         let cert = match cert {
             Some(mut cert) if cert.state == State::Ok => {
                 cert.state = State::Updating;
-                CertFacadeInternal::update_cert(self, &mut transaction, &cert).await?;
+                CertFacadeDatabase::update_cert(self, &mut transaction, &cert).await?;
                 Some(cert)
             }
             Some(mut cert) => {
@@ -156,7 +156,7 @@ impl CertFacade for DatabaseFacade<Postgres> {
                 if cert.update < one_hour_ago {
                     cert.update = now;
                     cert.state = State::Updating;
-                    CertFacadeInternal::update_cert(self, &mut transaction, &cert).await?;
+                    CertFacadeDatabase::update_cert(self, &mut transaction, &cert).await?;
                     Some(cert)
                 } else {
                     info!("job still in progress");
@@ -167,8 +167,8 @@ impl CertFacade for DatabaseFacade<Postgres> {
                 let domain = Domain::new()?;
                 let cert = Cert::new(&domain);
 
-                DomainFacadeInternal::create_domain(self, &mut transaction, &domain).await?;
-                CertFacadeInternal::create_cert(self, &mut transaction, &cert).await?;
+                DomainFacadeDatabase::create_domain(self, &mut transaction, &domain).await?;
+                CertFacadeDatabase::create_cert(self, &mut transaction, &cert).await?;
                 Some(cert)
             }
         };
@@ -181,10 +181,10 @@ impl CertFacade for DatabaseFacade<Postgres> {
     async fn stop_cert(&self, memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
 
-        match CertFacadeInternal::first_cert(self, &mut transaction).await? {
+        match CertFacadeDatabase::first_cert(self, &mut transaction).await? {
             Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
                 memory_cert.state = State::Ok;
-                CertFacadeInternal::update_cert(self, &self.pool, &memory_cert).await?;
+                CertFacadeDatabase::update_cert(self, &self.pool, &memory_cert).await?;
             }
             _ => {}
         }
@@ -194,31 +194,92 @@ impl CertFacade for DatabaseFacade<Postgres> {
     }
 }
 
+trait CertFacadeMemory {
+    fn first_cert(&self, lock: &mut InMemoryFacadeGuard<'_>) -> Option<Cert> {
+        lock.certs.values().next().map(Clone::clone)
+    }
+
+    fn update_cert(&self, lock: &mut InMemoryFacadeGuard<'_>, cert: &Cert) {
+        *lock.certs.get_mut(&cert.id).unwrap() = cert.clone();
+    }
+
+    fn create_cert(&self, lock: &mut InMemoryFacadeGuard<'_>, cert: &Cert) {
+        lock.certs.insert(cert.id.clone(), cert.clone());
+    }
+}
+
+impl CertFacadeMemory for InMemoryFacade {}
+
 #[async_trait]
 impl CertFacade for InMemoryFacade {
     async fn first_cert(&self) -> Result<Option<Cert>, sqlx::Error> {
-        let certs = self.certs.lock();
-        Ok(certs.values().next().map(Clone::clone))
+        let mut lock = self.0.lock();
+        let cert = CertFacadeMemory::first_cert(self, &mut lock);
+        Ok(cert)
     }
 
     async fn update_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-        let mut certs = self.certs.lock();
-        *certs.get_mut(&cert.id).unwrap() = cert.clone();
+        let mut lock = self.0.lock();
+        CertFacadeMemory::update_cert(self, &mut lock, cert);
 
         Ok(())
     }
 
     async fn create_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-        self.certs.lock().insert(cert.id.clone(), cert.clone());
+        let mut lock = self.0.lock();
+        CertFacadeMemory::create_cert(self, &mut lock, cert);
 
         Ok(())
     }
 
     async fn start_cert(&self) -> Result<Option<Cert>> {
-        unimplemented!()
+        let mut transaction = self.0.lock();
+        let cert = CertFacadeMemory::first_cert(self, &mut transaction);
+
+        let cert = match cert {
+            Some(mut cert) if cert.state == State::Ok => {
+                cert.state = State::Updating;
+                CertFacadeMemory::update_cert(self, &mut transaction, &cert);
+                Some(cert)
+            }
+            Some(mut cert) => {
+                let now = to_i64(&now());
+                let one_hour_ago = now - HOUR as i64;
+                // longer ago than 1 hour so probably timed out
+                if cert.update < one_hour_ago {
+                    cert.update = now;
+                    cert.state = State::Updating;
+                    CertFacadeMemory::update_cert(self, &mut transaction, &cert);
+                    Some(cert)
+                } else {
+                    info!("job still in progress");
+                    None
+                }
+            }
+            None => {
+                let domain = Domain::new()?;
+                let cert = Cert::new(&domain);
+
+                DomainFacadeMemory::create_domain(self, &mut transaction, &domain);
+                CertFacadeMemory::create_cert(self, &mut transaction, &cert);
+                Some(cert)
+            }
+        };
+
+        Ok(cert)
     }
 
-    async fn stop_cert(&self, _memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
-        unimplemented!()
+    async fn stop_cert(&self, memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
+        let mut transaction = self.0.lock();
+
+        match CertFacadeMemory::first_cert(self, &mut transaction) {
+            Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
+                memory_cert.state = State::Ok;
+                CertFacadeMemory::update_cert(self, &mut transaction, &memory_cert);
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
