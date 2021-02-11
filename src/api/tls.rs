@@ -111,12 +111,12 @@ mod tests {
     };
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::webpki::DNSNameRef;
     use tokio_rustls::TlsConnector;
 
     use super::wrap;
-    use crate::facade::TestFacade;
-    use tokio::net::{TcpListener, TcpStream};
+    use crate::facade::tests::TestFacade;
 
     struct TestVerifier;
 
@@ -139,8 +139,10 @@ mod tests {
 
     #[tokio::test]
     async fn test() {
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+
         let server_future = tokio::spawn(async move {
-            let server = TcpListener::bind("127.0.0.1:33000").await.unwrap();
             let server = server.accept().await.unwrap().0;
             let server = stream::iter(vec![Ok(future::ready(Ok(server)))]);
             let mut acceptor = wrap(server, TestFacade::default());
@@ -152,7 +154,7 @@ mod tests {
         });
 
         let client_future = tokio::spawn(async move {
-            let client = TcpStream::connect("127.0.0.1:33000").await.unwrap();
+            let client = TcpStream::connect(addr).await.unwrap();
             let mut client_config = ClientConfig::new();
             client_config
                 .dangerous()

@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use super::domain::{Domain, DomainFacadeInternal};
 use super::DatabaseFacade;
-use crate::facade::TestFacade;
 use crate::util::{now, to_i64, HOUR};
 
 #[derive(sqlx::Type, Debug, PartialEq, Clone)]
@@ -195,31 +194,40 @@ impl CertFacade for DatabaseFacade<Postgres> {
     }
 }
 
-#[async_trait]
-impl CertFacade for TestFacade {
-    async fn first_cert(&self) -> Result<Option<Cert>, sqlx::Error> {
-        let certs = self.certs.lock();
-        Ok(certs.values().next().map(Clone::clone))
-    }
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use async_trait::async_trait;
 
-    async fn update_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-        let mut certs = self.certs.lock();
-        *certs.get_mut(&cert.id).unwrap() = cert.clone();
+    use super::super::tests::TestFacade;
+    use super::{Cert, CertFacade};
 
-        Ok(())
-    }
+    #[async_trait]
+    impl CertFacade for TestFacade {
+        async fn first_cert(&self) -> Result<Option<Cert>, sqlx::Error> {
+            let certs = self.certs.lock();
+            Ok(certs.values().next().map(Clone::clone))
+        }
 
-    async fn create_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
-        self.certs.lock().insert(cert.id.clone(), cert.clone());
+        async fn update_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
+            let mut certs = self.certs.lock();
+            *certs.get_mut(&cert.id).unwrap() = cert.clone();
 
-        Ok(())
-    }
+            Ok(())
+        }
 
-    async fn start_cert(&self) -> Result<Option<Cert>> {
-        unimplemented!()
-    }
+        async fn create_cert(&self, cert: &Cert) -> Result<(), sqlx::Error> {
+            self.certs.lock().insert(cert.id.clone(), cert.clone());
 
-    async fn stop_cert(&self, _memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
-        unimplemented!()
+            Ok(())
+        }
+
+        async fn start_cert(&self) -> Result<Option<Cert>> {
+            unimplemented!()
+        }
+
+        async fn stop_cert(&self, _memory_cert: &mut Cert) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
     }
 }

@@ -1,16 +1,10 @@
-use parking_lot::Mutex;
 use sqlx::{Database, PgPool, Pool, Postgres};
-use std::collections::HashMap;
-use std::fs::read_to_string;
-use std::sync::Arc;
 
 mod cert;
 mod domain;
 
-use crate::util::{now, to_i64};
 pub use cert::{Cert, CertFacade, State};
 pub use domain::{Domain, DomainDTO, DomainFacade};
-use std::path::Path;
 
 #[derive(Debug)]
 pub(super) struct DatabaseFacade<DB: Database> {
@@ -31,31 +25,43 @@ impl From<PgPool> for DatabaseFacade<Postgres> {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct TestFacade {
-    certs: Arc<Mutex<HashMap<String, Cert>>>,
-    //domains: Mutex<HashMap<String, Domain>>,
-}
+#[cfg(test)]
+pub(super) mod tests {
+    use parking_lot::Mutex;
+    use std::collections::HashMap;
+    use std::fs::read_to_string;
+    use std::path::Path;
+    use std::sync::Arc;
 
-impl Default for TestFacade {
-    fn default() -> Self {
-        let cert = read_to_string(Path::new(file!()).with_file_name("cert.crt"));
-        let private = read_to_string(Path::new(file!()).with_file_name("key.key"));
+    use super::{Cert, State};
+    use crate::util::{now, to_i64};
 
-        let cert = Cert {
-            id: "1".to_owned(),
-            update: to_i64(&now()),
-            state: State::Ok,
-            cert: Some(cert.unwrap()),
-            private: Some(private.unwrap()),
-            domain: "acme-dns-rust.com".to_owned(),
-        };
+    #[derive(Clone)]
+    pub struct TestFacade {
+        pub certs: Arc<Mutex<HashMap<String, Cert>>>,
+        //domains: Mutex<HashMap<String, Domain>>,
+    }
 
-        let mut certs = HashMap::new();
-        certs.insert("1".to_owned(), cert);
+    impl Default for TestFacade {
+        fn default() -> Self {
+            let cert = read_to_string(Path::new(file!()).with_file_name("cert.crt"));
+            let private = read_to_string(Path::new(file!()).with_file_name("key.key"));
 
-        TestFacade {
-            certs: Arc::new(Mutex::new(certs)),
+            let cert = Cert {
+                id: "1".to_owned(),
+                update: to_i64(&now()),
+                state: State::Ok,
+                cert: Some(cert.unwrap()),
+                private: Some(private.unwrap()),
+                domain: "acme-dns-rust.com".to_owned(),
+            };
+
+            let mut certs = HashMap::new();
+            certs.insert("1".to_owned(), cert);
+
+            TestFacade {
+                certs: Arc::new(Mutex::new(certs)),
+            }
         }
     }
 }
