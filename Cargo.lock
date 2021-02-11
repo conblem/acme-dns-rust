@@ -6,6 +6,7 @@ version = "0.1.0"
 dependencies = [
  "acme-lib",
  "anyhow",
+ "async-trait",
  "bcrypt",
  "futures-util",
  "hyper",

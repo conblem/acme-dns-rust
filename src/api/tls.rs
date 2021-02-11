@@ -4,19 +4,18 @@ use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::RwLock;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
-use sqlx::PgPool;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use crate::cert::{Cert, CertFacade};
+use crate::facade::{Cert, CertFacade};
 use crate::util::to_u64;
 
-pub(super) fn wrap<L, I, S>(
+pub(super) fn wrap<L, I, S, F>(
     listener: L,
-    pool: PgPool,
+    facade: F,
 ) -> impl Stream<
     Item = Result<
         impl Future<Output = Result<impl AsyncRead + AsyncWrite + Send + Unpin + 'static>>,
@@ -26,8 +25,9 @@ where
     L: Stream<Item = IoResult<I>> + Send,
     I: Future<Output = IoResult<S>> + Send,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    F: CertFacade + Send + Sync,
 {
-    let acceptor = Acceptor::new(pool);
+    let acceptor = Acceptor::new(facade);
 
     listener
         .err_into()
@@ -39,17 +39,17 @@ where
         })
 }
 
-struct Acceptor {
-    pool: PgPool,
+struct Acceptor<F> {
+    facade: F,
     config: RwLock<(Option<Cert>, Arc<ServerConfig>)>,
 }
 
-impl Acceptor {
-    fn new(pool: PgPool) -> Arc<Self> {
+impl<F: CertFacade> Acceptor<F> {
+    fn new(facade: F) -> Arc<Self> {
         let server_config = ServerConfig::new(NoClientAuth::new());
 
         Arc::new(Acceptor {
-            pool,
+            facade,
             config: RwLock::new((None, Arc::new(server_config))),
         })
     }
@@ -77,7 +77,7 @@ impl Acceptor {
     }
 
     async fn load_cert(&self) -> Result<TlsAcceptor> {
-        let new_cert = CertFacade::first_cert(&self.pool).await;
+        let new_cert = self.facade.first_cert().await;
 
         let db_cert = match (new_cert, &*self.config.read()) {
             (Ok(Some(new_cert)), (cert, _)) if Some(&new_cert) != cert.as_ref() => new_cert,
@@ -110,8 +110,7 @@ mod tests {
     use tokio_rustls::webpki::DNSNameRef;
     use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-    #[tokio::test]
-    async fn test() {
+    async fn _test() {
         let (client, server) = tokio::io::duplex(64);
 
         let server_future = tokio::spawn(async move {

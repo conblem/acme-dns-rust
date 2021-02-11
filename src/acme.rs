@@ -14,6 +14,7 @@ pub struct DatabasePersist {
     runtime: Arc<Runtime>,
 }
 
+// todo: use facade
 impl DatabasePersist {
     pub fn new(pool: Pool<Postgres>, runtime: &Arc<Runtime>) -> Self {
         DatabasePersist {

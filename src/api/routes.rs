@@ -1,5 +1,4 @@
 use anyhow::Result;
-use sqlx::PgPool;
 use std::convert::TryFrom;
 use tracing::error;
 use warp::filters::trace;
@@ -8,13 +7,13 @@ use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
 use super::{metrics_wrapper, MetricsConfig};
-use crate::domain::{Domain, DomainDTO, DomainFacade};
+use crate::facade::{Domain, DomainDTO, DomainFacade};
 
-async fn register_handler(pool: PgPool) -> Result<WarpResponse, Rejection> {
+async fn register_handler<F: DomainFacade>(facade: F) -> Result<WarpResponse, Rejection> {
     let res: Result<DomainDTO> = async {
         let res = DomainDTO::default();
         let domain = Domain::try_from(res.clone())?;
-        DomainFacade::create_domain(&pool, &domain).await?;
+        facade.create_domain(&domain).await?;
         Ok(res)
     }
     .await;
@@ -40,10 +39,10 @@ async fn register_handler(pool: PgPool) -> Result<WarpResponse, Rejection> {
 const X_API_USER_HEADER: &str = "X-Api-User";
 const X_API_KEY_HEADER: &str = "X-Api-Key";
 
-async fn update_handler(
+async fn update_handler<F>(
     user: String,
     key: String,
-    _pool: PgPool,
+    _facade: F,
 ) -> Result<WarpResponse, Rejection> {
     Ok(format!("{} {}", user, key).into_response())
 }
@@ -51,14 +50,17 @@ async fn update_handler(
 const REGISTER_PATH: &str = "register";
 const UPDATE_PATH: &str = "update";
 
-pub(super) fn routes(
-    pool: PgPool,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {
-    let pool = warp::any().map(move || pool.clone());
+pub(super) fn routes<F>(
+    facade: F,
+) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static
+where
+    F: DomainFacade + Clone + Send + Sync + 'static,
+{
+    let facade = warp::any().map(move || facade.clone());
 
     let register = warp::path(REGISTER_PATH)
         .and(warp::post())
-        .and(pool.clone())
+        .and(facade.clone())
         .and_then(register_handler)
         .and(MetricsConfig::path());
 
@@ -66,7 +68,7 @@ pub(super) fn routes(
         .and(warp::post())
         .and(warp::header(X_API_USER_HEADER))
         .and(warp::header(X_API_KEY_HEADER))
-        .and(pool)
+        .and(facade)
         .and_then(update_handler)
         .and(MetricsConfig::path());
 

@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use futures_util::TryFutureExt;
-use sqlx::PgPool;
 use std::net::IpAddr::V4;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -17,29 +16,28 @@ use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
 
-use crate::cert::CertFacade;
 use crate::config::PreconfiguredRecords;
-use crate::domain::{Domain, DomainFacade};
+use crate::facade::{CertFacade, Domain, DomainFacade};
 use crate::util::error;
 
-pub struct DatabaseAuthority(Arc<DatabaseAuthorityInner>);
+pub struct DatabaseAuthority<F>(Arc<DatabaseAuthorityInner<F>>);
 
-struct DatabaseAuthorityInner {
+struct DatabaseAuthorityInner<F> {
     lower: LowerName,
-    pool: PgPool,
+    facade: F,
     records: PreconfiguredRecords,
     supported_algorithms: SupportedAlgorithms,
 }
 
-impl DatabaseAuthority {
-    pub fn new(pool: PgPool, name: &str, records: PreconfiguredRecords) -> Box<DatabaseAuthority> {
+impl<F> DatabaseAuthority<F> {
+    pub fn new(facade: F, name: &str, records: PreconfiguredRecords) -> Box<Self> {
         // todo: remove unwrap
         let lower = LowerName::from(Name::from_str(name).unwrap());
         // todo: remove unwrap
 
         let inner = DatabaseAuthorityInner {
             lower,
-            pool,
+            facade,
             records,
             supported_algorithms: SupportedAlgorithms::new(),
         };
@@ -83,7 +81,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> 
     Ok(Some(Arc::new(record_set)))
 }
 
-impl DatabaseAuthorityInner {
+impl<F: DomainFacade + CertFacade> DatabaseAuthorityInner<F> {
     #[tracing::instrument(err, skip(self, name, query_type))]
     async fn lookup_pre(
         &self,
@@ -129,13 +127,11 @@ impl DatabaseAuthorityInner {
 
     #[tracing::instrument(skip(self, name))]
     async fn acme_challenge(&self, name: Name) -> Result<LookupRecords> {
-        let pool = &self.pool;
-
-        let cert = match CertFacade::first_cert(pool).await? {
+        let cert = match self.facade.first_cert().await? {
             Some(cert) => cert,
             None => return Err(anyhow!("First cert not found")),
         };
-        let domain = match DomainFacade::find_by_id(pool, &cert.domain).await {
+        let domain = match self.facade.find_domain_by_id(&cert.domain).await {
             Ok(Some(domain)) => domain,
             Ok(None) => return Err(anyhow!("Domain not found {}", cert.domain)),
             Err(e) => return Err(e.into()),
@@ -151,7 +147,13 @@ impl DatabaseAuthorityInner {
 }
 
 #[allow(dead_code)]
-impl AuthorityObject for DatabaseAuthority {
+impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
+    for DatabaseAuthority<F>
+{
+    fn box_clone(&self) -> Box<(dyn AuthorityObject + 'static)> {
+        Box::new(DatabaseAuthority(Arc::clone(&self.0)))
+    }
+
     fn zone_type(&self) -> ZoneType {
         ZoneType::Primary
     }
@@ -166,10 +168,6 @@ impl AuthorityObject for DatabaseAuthority {
 
     fn origin(&self) -> LowerName {
         self.0.lower.clone()
-    }
-
-    fn box_clone(&self) -> Box<(dyn AuthorityObject + 'static)> {
-        Box::new(DatabaseAuthority(Arc::clone(&self.0)))
     }
 
     fn lookup(
@@ -217,7 +215,7 @@ impl AuthorityObject for DatabaseAuthority {
                     return authority.acme_challenge(name).await.map_err(error);
                 }
 
-                let txt = match DomainFacade::find_by_id(&authority.pool, &first).await {
+                let txt = match authority.facade.find_domain_by_id(&first).await {
                     Ok(Some(Domain { txt: Some(txt), .. })) => txt,
                     Ok(Some(Domain { txt: None, .. })) => return Ok(LookupRecords::Empty),
                     Ok(None) => return Err(error(anyhow!("Not found"))),
@@ -237,6 +235,15 @@ impl AuthorityObject for DatabaseAuthority {
             .inspect_err(|err| error!("{}", err))
             .instrument(span),
         )
+    }
+
+    fn get_nsec_records(
+        &self,
+        _name: &LowerName,
+        _is_secure: bool,
+        _supported_algorithms: SupportedAlgorithms,
+    ) -> BoxedLookupFuture {
+        BoxedLookupFuture::empty()
     }
 
     // fix handling of this as this always take self.origin
@@ -272,15 +279,6 @@ impl AuthorityObject for DatabaseAuthority {
         _supported_algorithms: SupportedAlgorithms,
     ) -> BoxedLookupFuture {
         self.soa()
-    }
-
-    fn get_nsec_records(
-        &self,
-        _name: &LowerName,
-        _is_secure: bool,
-        _supported_algorithms: SupportedAlgorithms,
-    ) -> BoxedLookupFuture {
-        BoxedLookupFuture::empty()
     }
 }
 

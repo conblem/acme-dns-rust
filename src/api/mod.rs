@@ -6,7 +6,6 @@ use hyper::server::conn::Http;
 use lazy_static::lazy_static;
 use metrics::{metrics, metrics_wrapper, MetricsConfig};
 use prometheus::{register_int_counter_vec, register_int_gauge_vec, IntCounterVec, IntGaugeVec};
-use sqlx::PgPool;
 use std::fmt::Display;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -16,6 +15,7 @@ use tracing::{error, info, info_span, Instrument};
 use warp::{Filter, Rejection, Reply};
 
 use crate::config::Listener;
+use crate::facade::{CertFacade, DomainFacade};
 
 mod metrics;
 mod proxy;
@@ -81,19 +81,22 @@ where
     }
 }
 
-pub async fn new(
+pub async fn new<F>(
     (http, http_proxy): Listener,
     (https, https_proxy): Listener,
     (prom, prom_proxy): Listener,
-    pool: PgPool,
-) -> Result<()> {
+    facade: F,
+) -> Result<()>
+where
+    F: DomainFacade + CertFacade + Clone + Send + Sync + 'static,
+{
     let http = OptionFuture::from(http.map(TcpListener::bind)).map(Option::transpose);
     let https = OptionFuture::from(https.map(TcpListener::bind)).map(Option::transpose);
     let prom = OptionFuture::from(prom.map(TcpListener::bind)).map(Option::transpose);
 
     let (http, https, prom) = tokio::try_join!(http, https, prom)?;
 
-    let routes = routes::routes(pool.clone());
+    let routes = routes::routes(facade.clone());
 
     let http = http
         .map(move |http| proxy::wrap(http, http_proxy))
@@ -107,7 +110,7 @@ pub async fn new(
 
     let https = https
         .map(move |https| proxy::wrap(https, https_proxy))
-        .map(|https| tls::wrap(https, pool))
+        .map(|https| tls::wrap(https, facade))
         .map(|https| serve(https, routes, "HTTPS").instrument(info_span!("HTTPS")))
         .map(tokio::spawn);
 

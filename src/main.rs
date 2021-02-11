@@ -10,6 +10,7 @@ use tokio::runtime::Runtime;
 use tokio::signal::ctrl_c;
 use tracing::{debug, error, info, Instrument};
 
+use crate::facade::PostgresFacade;
 use acme::DatabasePersist;
 use cert::CertManager;
 use dns::{DatabaseAuthority, DNS};
@@ -19,7 +20,7 @@ mod api;
 mod cert;
 mod config;
 mod dns;
-mod domain;
+mod facade;
 mod util;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
@@ -47,7 +48,9 @@ fn run() -> Result<()> {
         debug!("Running in runtime");
 
         let pool = setup_database(&config.general.db).await?;
-        let authority = DatabaseAuthority::new(pool.clone(), &config.general.name, config.records);
+        let facade = PostgresFacade::from(pool.clone());
+        let authority =
+            DatabaseAuthority::new(facade.clone(), &config.general.name, config.records);
         let dns = DNS::new(&config.general.dns, authority);
 
         let api = &config.api;
@@ -55,11 +58,11 @@ fn run() -> Result<()> {
             api.http.clone(),
             api.https.clone(),
             api.prom.clone(),
-            pool.clone(),
+            facade.clone(),
         );
 
-        let persist = DatabasePersist::new(pool.clone(), &runtime);
-        let cert_manager = CertManager::new(pool, persist, config.general.acme, &runtime)
+        let persist = DatabasePersist::new(pool, &runtime);
+        let cert_manager = CertManager::new(facade, persist, config.general.acme, &runtime)
             .and_then(CertManager::spawn);
 
         info!("Starting API Cert Manager and DNS");
