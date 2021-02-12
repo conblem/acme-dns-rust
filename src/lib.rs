@@ -86,3 +86,24 @@ async fn setup_database(db: &str) -> Result<PgPool, sqlx::Error> {
     info!("Ran migration");
     Ok(pool)
 }
+
+#[cfg(test)]
+mod tests {
+    use testcontainers::*;
+
+    use super::setup_database;
+
+    #[cfg(not(feature = "disable-docker"))]
+    #[tokio::test]
+    async fn test_setup_database() {
+        let docker = clients::Cli::default();
+        let node = docker.run(images::postgres::Postgres::default());
+
+        let connection_string = &format!(
+            "postgres://postgres:postgres@localhost:{}/postgres",
+            node.get_host_port(5432).unwrap()
+        );
+
+        let _pool = setup_database(connection_string).await.unwrap();
+    }
+}

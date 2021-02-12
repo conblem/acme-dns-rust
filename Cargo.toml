@@ -43,9 +43,11 @@ async-trait = "0.1.0"
 serde_test = "1.0"
 tracing-test = "0.1"
 tokio-test = "0.4"
+testcontainers = "0.12"
 
 [features]
 default = ["postgres"]
+disable-docker = []
 
 postgres = ["sqlx/postgres"]
 mysql = ["sqlx/mysql"]
