@@ -104,6 +104,14 @@ mod tests {
             node.get_host_port(5432).unwrap()
         );
 
-        let _pool = setup_database(connection_string).await.unwrap();
+        let pool = setup_database(connection_string).await.unwrap();
+
+        let actual: (i64,) = sqlx::query_as("SELECT $1")
+            .bind(150_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(150_i64, actual.0)
     }
 }
