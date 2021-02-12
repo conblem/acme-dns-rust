@@ -286,7 +286,9 @@ impl CertFacade for InMemoryFacade {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use testcontainers::*;
+    use testcontainers::clients::Cli;
+    use testcontainers::images::postgres::Postgres;
+    use testcontainers::Docker;
 
     use super::{Cert, CertFacade, DatabaseFacade, State};
     use crate::setup_database;
@@ -306,8 +308,8 @@ pub(crate) mod tests {
     #[cfg(not(feature = "disable-docker"))]
     //#[tokio::test]
     async fn _test_postgres_cert_facade() {
-        let docker = clients::Cli::default();
-        let node = docker.run(images::postgres::Postgres::default());
+        let docker = Cli::default();
+        let node = docker.run(Postgres::default());
 
         let connection_string = &format!(
             "postgres://postgres:postgres@localhost:{}/postgres",
