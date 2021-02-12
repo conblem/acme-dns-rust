@@ -3,7 +3,7 @@ use sqlx::{Database, PgPool, Pool, Postgres};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-mod cert;
+pub(crate) mod cert;
 mod domain;
 
 pub use cert::{Cert, CertFacade, State};

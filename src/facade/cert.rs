@@ -283,3 +283,49 @@ impl CertFacade for InMemoryFacade {
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use testcontainers::*;
+
+    use super::{Cert, CertFacade, DatabaseFacade, State};
+    use crate::setup_database;
+    use crate::util::{now, to_i64};
+
+    pub(crate) fn create_cert() -> Cert {
+        Cert {
+            id: "1".to_owned(),
+            update: to_i64(&now()),
+            state: State::Ok,
+            cert: Some(include_str!("../../tests/cert.crt").to_owned()),
+            private: Some(include_str!("../../tests/key.key").to_owned()),
+            domain: "acme-dns-rust.com".to_owned(),
+        }
+    }
+
+    #[cfg(not(feature = "disable-docker"))]
+    //#[tokio::test]
+    async fn _test_postgres_cert_facade() {
+        let docker = clients::Cli::default();
+        let node = docker.run(images::postgres::Postgres::default());
+
+        let connection_string = &format!(
+            "postgres://postgres:postgres@localhost:{}/postgres",
+            node.get_host_port(5432).unwrap()
+        );
+
+        let pool = setup_database(connection_string).await.unwrap();
+        let facade = DatabaseFacade::from(pool);
+        let mut cert = create_cert();
+
+        facade.create_cert(&cert).await.unwrap();
+
+        let actual = facade.first_cert().await.unwrap().unwrap();
+        assert_eq!(cert, actual);
+
+        cert.state = State::Updating;
+        facade.update_cert(&cert).await.unwrap();
+        let actual = facade.first_cert().await.unwrap().unwrap();
+        assert_eq!(cert, actual);
+    }
+}

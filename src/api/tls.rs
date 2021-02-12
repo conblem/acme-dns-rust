@@ -159,19 +159,8 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
 #[cfg(test)]
 mod tests {
     use super::create_server_config;
-    use crate::facade::{Cert, State};
-    use crate::util::{now, to_i64};
-
-    fn create_cert() -> Cert {
-        Cert {
-            id: "1".to_owned(),
-            update: to_i64(&now()),
-            state: State::Ok,
-            cert: Some(include_str!("../../tests/cert.crt").to_owned()),
-            private: Some(include_str!("../../tests/key.key").to_owned()),
-            domain: "acme-dns-rust.com".to_owned(),
-        }
-    }
+    use crate::facade::cert::tests::create_cert;
+    use crate::facade::Cert;
 
     #[test]
     fn test_create_server_config_alpn() {
