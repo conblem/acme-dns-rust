@@ -6,6 +6,8 @@ use prometheus::{
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::io::{BufRead, Error as IoError};
+use std::time::Duration;
+use tokio::time::Instant;
 use tracing::{debug, error};
 use warp::filters::trace;
 use warp::http::{Method, Response, StatusCode};
@@ -206,12 +208,29 @@ impl HistogramTimerWrapper {
     }
 }
 
+struct Timer(Instant);
+
+impl Timer {
+    fn start() -> Self {
+        Timer(Instant::now())
+    }
+
+    fn stop(self) -> Duration {
+        let Timer(earlier) = self;
+
+        Instant::now().duration_since(earlier)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hyper::body;
+    use std::time::Duration;
+    use tokio::time;
     use tracing_test::traced_test;
+    use warp::{test, Filter};
 
-    use super::{internal_server_error_and_trace, remove_zero_metrics};
+    use super::{internal_server_error_and_trace, remove_zero_metrics, MetricsConfig, Timer};
 
     #[test]
     fn test_remove_zero_metrics() {
@@ -235,5 +254,35 @@ tcp_open_connection_counter{endpoint="PROM"} 0"#;
 
         let body = body::to_bytes(actual).await.unwrap();
         assert_eq!("This is a error", body);
+    }
+
+    #[tokio::test]
+    async fn metrics_config_path() {
+        let filter = MetricsConfig::path().map(|config: MetricsConfig| config.as_str().to_owned());
+
+        let actual = test::request().path("/test").reply(&filter).await;
+
+        assert_eq!("/test", actual.body())
+    }
+
+    #[tokio::test]
+    async fn metrics_config_new() {
+        let filter =
+            MetricsConfig::new("404").map(|config: MetricsConfig| config.as_str().to_owned());
+
+        let actual = test::request().path("/test").reply(&filter).await;
+
+        assert_eq!("404", actual.body())
+    }
+
+    #[tokio::test]
+    async fn test_timer() {
+        time::pause();
+
+        let timer = Timer::start();
+        time::advance(Duration::from_millis(1000)).await;
+
+        let actual = timer.stop().as_millis();
+        assert_eq!(actual, 1000);
     }
 }
