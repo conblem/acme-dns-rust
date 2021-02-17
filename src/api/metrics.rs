@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
-    IntCounterVec, TextEncoder,
+    IntCounterVec, Registry, TextEncoder,
 };
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -142,7 +142,7 @@ fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
             Ok(len) => len,
             Err(e) => break Err(e),
         };
-        if res.ends_with(" 0\n") {
+        if res.ends_with(" 0\n") | res.ends_with(" 0") {
             res.truncate(res.len() - len);
         }
     }
@@ -150,9 +150,9 @@ fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
 
 // maybe this implementation is wrong as it removes bucket items aswell
 // this method leaks internal errors so it should not be public
-fn metrics_handler() -> WarpResponse {
+fn metrics_handler(registry: &Registry) -> WarpResponse {
     let encoder = TextEncoder::new();
-    let families = prometheus::gather();
+    let families = registry.gather();
 
     let mut res = vec![];
     if let Err(e) = encoder.encode(&families, &mut res) {
@@ -173,7 +173,7 @@ pub(crate) fn metrics(
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + 'static {
     warp::path(METRICS_PATH)
         .and(warp::get())
-        .map(metrics_handler)
+        .map(|| metrics_handler(prometheus::default_registry()))
         .and(MetricsConfig::path())
         .with(warp::wrap_fn(metrics_wrapper))
         .with(trace::request())
@@ -203,5 +203,37 @@ impl Drop for HistogramTimerWrapper {
 impl HistogramTimerWrapper {
     fn take(&mut self) -> Option<HistogramTimer> {
         self.0.take()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyper::body;
+    use tracing_test::traced_test;
+
+    use super::{internal_server_error_and_trace, remove_zero_metrics};
+
+    #[test]
+    fn test_remove_zero_metrics() {
+        let actual = r#"tcp_closed_connection_counter{endpoint="PROM"} 0
+http_status_counter{method="GET",path="/metrics",status="200"} 4
+tcp_open_connection_counter{endpoint="PROM"} 0"#;
+
+        let expected = r#"http_status_counter{method="GET",path="/metrics",status="200"} 4
+"#;
+        let actual = remove_zero_metrics(actual.as_bytes()).unwrap();
+        assert_eq!(expected, actual);
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_internal_server_error_and_trace() {
+        let error = "This is a error".to_owned();
+
+        let actual = internal_server_error_and_trace(&error);
+        assert!(logs_contain("This is a error"));
+
+        let body = body::to_bytes(actual).await.unwrap();
+        assert_eq!("This is a error", body);
     }
 }

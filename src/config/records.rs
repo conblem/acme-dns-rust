@@ -25,7 +25,7 @@ where
         where
             A: MapAccess<'de>,
         {
-            let mut res = HashMap::new();
+            let mut res = HashMap::with_capacity(map.size_hint().unwrap_or_default());
             while let Some(key) = map.next_key::<&str>()? {
                 let mut name = Name::from_str(key).map_err(DeError::custom)?;
                 name.set_fqdn(true);
