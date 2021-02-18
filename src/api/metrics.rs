@@ -1,12 +1,11 @@
 use lazy_static::lazy_static;
 use prometheus::{
-    register_histogram_vec, register_int_counter_vec, Encoder, HistogramTimer, HistogramVec,
-    IntCounterVec, Registry, TextEncoder,
+    register_histogram_vec, register_int_counter_vec, Encoder, HistogramVec, IntCounterVec,
+    Registry, TextEncoder,
 };
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::io::{BufRead, Error as IoError};
-use std::time::Duration;
 use tokio::time::Instant;
 use tracing::{debug, error};
 use warp::filters::trace;
@@ -80,21 +79,12 @@ where
     I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,
 {
     move |filter: I| {
-        warp::filters::method::method()
-            .map(move |method| {
-                let timer = http_req_histogram
-                    .with_label_values(&["", ""])
-                    .start_timer()
-                    .into();
-                (method, timer)
-            })
-            .untuple_one()
+        warp::any()
+            .map(Instant::now)
+            .and(warp::filters::method::method())
             .and(filter)
             .map(
-                move |method: Method,
-                      mut timer: HistogramTimerWrapper,
-                      res: WarpResponse,
-                      config: MetricsConfig| {
+                move |timer: Instant, method: Method, res: WarpResponse, config: MetricsConfig| {
                     http_status_counter
                         .with_label_values(&[
                             config.as_str(),
@@ -103,15 +93,12 @@ where
                         ])
                         .inc();
 
-                    if let Some(timer) = timer.take() {
-                        let time = timer.stop_and_discard();
+                    let time = timer.elapsed().as_secs_f64();
+                    http_req_histogram
+                        .with_label_values(&[config.as_str(), method.as_str()])
+                        .observe(time);
 
-                        http_req_histogram
-                            .with_label_values(&[config.as_str(), method.as_str()])
-                            .observe(time);
-
-                        debug!("request took {}ms", time * 1000f64);
-                    }
+                    debug!("request took {}ms", time * 1000f64);
 
                     res
                 },
@@ -181,56 +168,13 @@ pub(crate) fn metrics(
         .with(trace::request())
 }
 
-// todo: think about if this is still the right abstraction
-// because the metrics now get applied over all routes
-// Changes the default behaviour of HistogramTimer so it doesn't record the value if it is being dropped
-// this value can get dropped if warp rejects the request
-struct HistogramTimerWrapper(Option<HistogramTimer>);
-
-impl From<HistogramTimer> for HistogramTimerWrapper {
-    fn from(input: HistogramTimer) -> Self {
-        HistogramTimerWrapper(Some(input))
-    }
-}
-
-impl Drop for HistogramTimerWrapper {
-    fn drop(&mut self) {
-        if let Some(histogram_timer) = self.take() {
-            let time = histogram_timer.stop_and_discard() * 1000f64;
-            debug!("rejection took {}ms", time);
-        }
-    }
-}
-
-impl HistogramTimerWrapper {
-    fn take(&mut self) -> Option<HistogramTimer> {
-        self.0.take()
-    }
-}
-
-struct Timer(Instant);
-
-impl Timer {
-    fn start() -> Self {
-        Timer(Instant::now())
-    }
-
-    fn stop(self) -> Duration {
-        let Timer(earlier) = self;
-
-        Instant::now().duration_since(earlier)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use hyper::body;
-    use std::time::Duration;
-    use tokio::time;
     use tracing_test::traced_test;
     use warp::{test, Filter};
 
-    use super::{internal_server_error_and_trace, remove_zero_metrics, MetricsConfig, Timer};
+    use super::{internal_server_error_and_trace, remove_zero_metrics, MetricsConfig};
 
     #[test]
     fn test_remove_zero_metrics() {
@@ -273,16 +217,5 @@ tcp_open_connection_counter{endpoint="PROM"} 0"#;
         let actual = test::request().path("/test").reply(&filter).await;
 
         assert_eq!("404", actual.body())
-    }
-
-    #[tokio::test]
-    async fn test_timer() {
-        time::pause();
-
-        let timer = Timer::start();
-        time::advance(Duration::from_millis(1000)).await;
-
-        let actual = timer.stop().as_millis();
-        assert_eq!(actual, 1000);
     }
 }

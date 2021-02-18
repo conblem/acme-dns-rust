@@ -73,14 +73,24 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn should_panic_extract_error() {
+        extract_error(acme_lib::Error::Other("Test".to_owned()));
+    }
+
+    fn extract_error(err: acme_lib::Error) -> IoError {
+        match err {
+            acme_lib::Error::Io(err) => err,
+            _ => panic!("Cannot match err"),
+        }
+    }
+
+    #[test]
     fn io_error_works() {
         let expected = IoError::new(ErrorKind::InvalidData, "Hallo");
         let err = IoError::new(ErrorKind::InvalidData, "Hallo");
 
-        let actual = match error(err) {
-            acme_lib::Error::Io(err) => err,
-            _ => panic!("Cannot match err"),
-        };
+        let actual = extract_error(error(err));
 
         assert_eq!(format!("{:?}", expected), format!("{:?}", actual));
     }
@@ -89,10 +99,7 @@ mod tests {
     fn error_works() {
         let expected = anyhow!("test");
 
-        let actual = match error(anyhow!("test")) {
-            acme_lib::Error::Io(err) => err,
-            _ => panic!("Cannot match err"),
-        };
+        let actual = extract_error(error(anyhow!("test")));
 
         assert_eq!(ErrorKind::Other, actual.kind());
 
