@@ -59,12 +59,16 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
-  coverage:
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ macos-latest, windows-latest, ubuntu-latest ]
         toolchain: [ stable, nightly ]
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+            coverage: true
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -76,9 +80,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-coverage-1-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.toolchain }}-coverage--${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rs/cargo@v1
+        if: !${{ matrix.coverage }}
+          with:
+            command: test
       - uses: actions-rs/tarpaulin@v0.1
+        if: ${{ matrix.coverage }}
       - uses: codecov/codecov-action@v1
+        if: ${{ matrix.coverage }}
         with:
           fail_ci_if_error: true
   fmt:
