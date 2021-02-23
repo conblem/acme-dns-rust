@@ -82,7 +82,7 @@ jobs:
             target
           key: ${{ runner.os }}-${{ matrix.toolchain }}-coverage--${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/cargo@v1
-        if: !${{ matrix.coverage }}
+        if: ${{ !matrix.coverage }}
           with:
             command: test
       - uses: actions-rs/tarpaulin@v0.1
