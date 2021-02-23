@@ -54,7 +54,7 @@ impl MetricsConfig {
     }
 }
 
-// type magic to return a closure which returns a unable warp filter
+// type magic to return a closure which returns a unnameable warp filter
 trait MetricsWrapper<I>: Fn(I) -> <Self as MetricsWrapper<I>>::Output
 where
     I: Filter<Extract = (WarpResponse, MetricsConfig), Error = Rejection> + Clone + Send + 'static,

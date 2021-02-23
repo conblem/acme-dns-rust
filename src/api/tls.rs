@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use futures_util::stream::{repeat, Stream};
 use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::RwLock;
-use rustls::internal::pemfile::{certs, pkcs8_private_keys};
+use rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use std::future::Future;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ where
     L: Stream<Item = IoResult<I>> + Send + 'static,
     I: Future<Output = IoResult<S>> + Send + 'static,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    A: Fn() -> F + Clone + Send + 'static,
+    A: FnOnce() -> F + Clone + Send + 'static,
     F: Future<Output = Result<TlsAcceptor>>,
 {
     listener
@@ -59,13 +59,13 @@ where
 }
 
 // used for expressing a closure with an impl return
-trait Func: Fn() -> <Self as Func>::Output {
+trait Func: FnOnce() -> <Self as Func>::Output {
     type Output;
 }
 
 impl<F, O> Func for F
 where
-    F: Fn() -> O,
+    F: FnOnce() -> O,
 {
     type Output = O;
 }
@@ -83,13 +83,9 @@ where
     let config = RwLock::new((None, Arc::new(server_config)));
     let wrapper = Arc::new((facade, config));
 
-    // workarround to make closure Fn instead of FnOnce
-    move || {
-        let wrapper = Arc::clone(&wrapper);
-        async move {
-            let (facade, config) = &*wrapper;
-            load_cert(facade, config).await
-        }
+    || async move {
+        let (facade, config) = &*wrapper;
+        load_cert(facade, config).await
     }
 }
 
@@ -141,7 +137,7 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
     };
 
     let mut privates =
-        pkcs8_private_keys(&mut private.as_bytes()).map_err(|_| anyhow!("Private is invalid"))?;
+        rsa_private_keys(&mut private.as_bytes()).map_err(|_| anyhow!("Private is invalid"))?;
     let private = privates
         .pop()
         .ok_or_else(|| anyhow!("Private Vec is empty"))?;

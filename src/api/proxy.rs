@@ -54,7 +54,7 @@ pub(crate) fn wrap(
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        error!("Could net get remote.addr: {}", e);
+                        error!("Could net get remote.real: {}", e);
                     }
                 }
                 Ok(conn)

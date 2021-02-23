@@ -1,4 +1,5 @@
 use anyhow::Error;
+use std::fmt::{Debug, Display};
 use std::io::{Error as IoError, ErrorKind};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -18,8 +19,18 @@ pub fn now() -> u64 {
         .as_secs()
 }
 
-pub(crate) fn error<I: Into<Error>, E: From<IoError>>(err: I) -> E {
+pub(crate) fn error<I, E>(err: I) -> E
+where
+    I: Into<Error>,
+    E: From<IoError> + Display + Debug + Send + Sync + 'static,
+{
     let err = err.into();
+
+    let err = match err.downcast::<E>() {
+        Ok(err) => return err,
+        Err(err) => err,
+    };
+
     let err = match err.downcast::<IoError>() {
         Ok(err) => err,
         Err(err) => IoError::new(ErrorKind::Other, err),
