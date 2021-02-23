@@ -71,6 +71,9 @@ jobs:
             coverage: true
     steps:
       - uses: actions/checkout@v2
+      - name: install openssl on windows
+        run: vcpkg install openssl:x64-windows
+        if: ${{ matrix.os == 'windows-latest' }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.toolchain }}
