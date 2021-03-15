@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures_util::TryFutureExt;
+use std::io::{Error as IoError, ErrorKind};
 use std::net::IpAddr::V4;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -218,7 +219,7 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
                 let txt = match authority.facade.find_domain_by_id(&first).await {
                     Ok(Some(Domain { txt: Some(txt), .. })) => txt,
                     Ok(Some(Domain { txt: None, .. })) => return Ok(LookupRecords::Empty),
-                    Ok(None) => return Err(error(anyhow!("Not found"))),
+                    Ok(None) => return Err(error(IoError::from(ErrorKind::NotFound))),
                     Err(e) => return Err(error(e)),
                 };
                 let txt = TXT::new(vec![txt]);
