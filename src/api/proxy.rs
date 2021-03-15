@@ -73,7 +73,7 @@ where
 {
     fn source(self, proxy: ProxyProtocol) -> ProxyStream<T> {
         let data = match proxy {
-            ProxyProtocol::Enabled => Some(Default::default()),
+            ProxyProtocol::Enabled => Some(Vec::with_capacity(256)),
             ProxyProtocol::Disabled => None,
         };
         ProxyStream {
@@ -215,13 +215,13 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let stream = Pin::new(&mut this.proxy_stream.stream);
 
         let data = match &mut this.proxy_stream.data {
             Some(data) => data,
             None => return Poll::Ready(Ok(None)),
         };
 
+        let stream = Pin::new(&mut this.proxy_stream.stream);
         match ready!(poll_read_buf(stream, cx, data)) {
             Ok(0) => {
                 return Poll::Ready(Err(IoError::new(

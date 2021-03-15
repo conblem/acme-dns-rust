@@ -1,4 +1,5 @@
 use anyhow::Error;
+use std::any::Any;
 use std::fmt::{Debug, Display};
 use std::io::{Error as IoError, ErrorKind};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,12 +20,23 @@ pub fn now() -> u64 {
         .as_secs()
 }
 
+// E allows all StdError + Send + Sync + 'static or AnyhowError as this can only be constructed from the former
 pub(crate) fn error<I, E>(err: I) -> E
 where
-    I: Into<Error>,
+    I: Into<Error> + 'static,
     E: From<IoError> + Display + Debug + Send + Sync + 'static,
 {
-    let err = err.into();
+    // specialization if error is E or IoError
+    // gets optimized away at compile time
+    let mut err = Some(err);
+    if let Some(err) = Any::downcast_mut::<Option<E>>(&mut err) {
+        return err.take().unwrap();
+    }
+    if let Some(err) = Any::downcast_mut::<Option<IoError>>(&mut err) {
+        return err.take().unwrap().into();
+    }
+
+    let err = err.unwrap().into();
 
     let err = match err.downcast::<E>() {
         Ok(err) => return err,
@@ -99,9 +111,9 @@ mod tests {
     #[test]
     fn io_error_works() {
         let expected = IoError::new(ErrorKind::InvalidData, "Hallo");
-        let err = IoError::new(ErrorKind::InvalidData, "Hallo");
 
-        let actual = extract_error(error(err));
+        let actual = IoError::new(ErrorKind::InvalidData, "Hallo");
+        let actual = extract_error(error(actual));
 
         assert_eq!(format!("{:?}", expected), format!("{:?}", actual));
     }
