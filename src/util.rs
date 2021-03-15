@@ -48,7 +48,7 @@ where
         Err(err) => IoError::new(ErrorKind::Other, err),
     };
 
-    E::from(err)
+    err.into()
 }
 
 pub(crate) fn uuid() -> String {
