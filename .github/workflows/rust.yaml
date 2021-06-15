@@ -75,8 +75,6 @@ jobs:
         run:  |
           vcpkg install openssl:x64-windows-static-md
           vcpkg integrate install
-          echo "VCPKGRS_DYNAMIC=1" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=C:/vcpkg/packages/openssl_x64-windows" >> $GITHUB_ENV
         if: ${{ matrix.os == 'windows-latest' }}
       - uses: actions-rs/toolchain@v1
         with:
