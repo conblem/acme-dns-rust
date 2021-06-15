@@ -2,7 +2,7 @@ name: Rust
 on:
   push:
     paths-ignore:
-      - 'cross/**'
+      - "cross/**"
     branches:
       - dev
     pull_request:
@@ -91,6 +91,8 @@ jobs:
           args: --features disable-docker
       - uses: actions-rs/tarpaulin@v0.1
         if: ${{ matrix.coverage }}
+        with:
+          version: "0.16.0"
       - uses: codecov/codecov-action@v1
         if: ${{ matrix.coverage }}
         with:
