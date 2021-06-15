@@ -289,6 +289,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_incomplete() {
         let header = ppp::to_bytes(generate_ipv4()).unwrap();
 
@@ -311,6 +312,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_io_error() {
         // builder needs to be dropped before stream can be used
         // otherwise the internal tokio arc error has 2 strong references
