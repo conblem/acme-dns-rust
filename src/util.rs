@@ -28,15 +28,15 @@ where
 {
     let mut err = Some(err);
 
-    if let Some(err) = Any::downcast_mut::<Option<E>>(&mut err) {
+    if let Some(err) = <dyn Any>::downcast_mut::<Option<E>>(&mut err) {
         return err.take().unwrap();
     }
 
-    if let Some(err) = Any::downcast_mut::<Option<IoError>>(&mut err) {
+    if let Some(err) = <dyn Any>::downcast_mut::<Option<IoError>>(&mut err) {
         return err.take().unwrap().into();
     }
 
-    if let Some(err) = Any::downcast_mut::<Option<Error>>(&mut err) {
+    if let Some(err) = <dyn Any>::downcast_mut::<Option<Error>>(&mut err) {
         let err = match err.take().unwrap().downcast::<E>() {
             Ok(err) => return err,
             Err(err) => err,

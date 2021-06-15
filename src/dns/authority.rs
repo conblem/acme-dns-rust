@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use futures_util::TryFutureExt;
 use std::io::{Error as IoError, ErrorKind};
 use std::net::IpAddr::V4;
+use std::str;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
@@ -202,6 +203,11 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
         BoxedLookupFuture::from(
             async move {
                 info!("Starting lookup");
+                let first = match name.iter().next() {
+                    Some(first) => first,
+                    None => return Ok(LookupRecords::Empty),
+                };
+
                 if name.is_empty() {
                     return Ok(LookupRecords::Empty);
                 }
@@ -211,12 +217,16 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
                     return Ok(pre);
                 }
 
-                let first = name[0].to_string();
-                if first == "_acme-challenge" {
+                if first == b"_acme-challenge" {
                     return authority.acme_challenge(name).await.map_err(error);
                 }
 
-                let txt = match authority.facade.find_domain_by_id(&first).await {
+                let first = match str::from_utf8(first) {
+                    Ok(first) => first,
+                    Err(e) => return Err(error(e)),
+                };
+
+                let txt = match authority.facade.find_domain_by_id(first).await {
                     Ok(Some(Domain { txt: Some(txt), .. })) => txt,
                     Ok(Some(Domain { txt: None, .. })) => return Ok(LookupRecords::Empty),
                     Ok(None) => return Err(error(IoError::from(ErrorKind::NotFound))),
