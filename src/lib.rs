@@ -12,7 +12,7 @@ use tracing::{debug, info, Instrument};
 
 use acme::DatabasePersist;
 use cert::CertManager;
-use dns::{DatabaseAuthority, DNS};
+use dns::{DatabaseAuthority, Dns};
 use facade::DatabaseFacade;
 
 mod acme;
@@ -42,7 +42,7 @@ pub fn run() -> Result<()> {
         let facade = DatabaseFacade::from(pool.clone());
         let authority =
             DatabaseAuthority::new(facade.clone(), &config.general.name, config.records);
-        let dns = DNS::new(&config.general.dns, authority);
+        let dns = Dns::new(&config.general.dns, authority);
 
         let api = &config.api;
         let api = api::new(

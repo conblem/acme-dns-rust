@@ -12,13 +12,13 @@ mod handler;
 pub use authority::DatabaseAuthority;
 use handler::TraceRequestHandler;
 
-pub struct DNS<A> {
+pub struct Dns<A> {
     server: ServerFuture<TraceRequestHandler>,
     addr: A,
     span: Span,
 }
 
-impl<A: ToSocketAddrs> DNS<A> {
+impl<A: ToSocketAddrs> Dns<A> {
     pub fn new(addr: A, authority: Box<dyn AuthorityObject>) -> Self {
         let span = info_span!("DNS::spawn", local.addr = Empty);
 
@@ -28,7 +28,7 @@ impl<A: ToSocketAddrs> DNS<A> {
 
         let server = ServerFuture::new(request_handler);
 
-        DNS { server, addr, span }
+        Dns { server, addr, span }
     }
 
     #[tracing::instrument(skip(self))]

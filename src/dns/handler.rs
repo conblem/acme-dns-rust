@@ -53,10 +53,7 @@ impl RequestHandler for TraceRequestHandler {
             .map(LowerQuery::name)
             .map(ToString::to_string);
 
-        let name = match &name {
-            Some(name) => Some([name.as_str()]),
-            None => None,
-        };
+        let name = name.as_ref().map(|name| [name.as_str()]);
 
         let name = match &name {
             Some(name) => &name[..],
