@@ -21,7 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 sqlx = { version = "0.5", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
-tokio = { version = "1.0", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
+tokio = { version = "1.6", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = "0.6"
 tokio-rustls = "0.22"
@@ -37,7 +37,7 @@ rustls = "0.19"
 toml = "0.5"
 anyhow = "1.0"
 ppp = "1.2"
-async-trait = "0.1.0"
+async-trait = "0.1.50"
 
 [dev-dependencies]
 serde_test = "1.0"
