@@ -26,7 +26,7 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = "0.6"
 tokio-rustls = "0.22"
 uuid = { version = "0.8", features = ["v4"] }
-bcrypt = "0.9"
+bcrypt = "0.10"
 warp = { version = "0.3", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 acme-lib = "0.8"
