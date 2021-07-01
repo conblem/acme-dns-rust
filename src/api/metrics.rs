@@ -186,7 +186,7 @@ tcp_open_connection_counter{endpoint="PROM"} 0"#;
         let expected = r#"http_status_counter{method="GET",path="/metrics",status="200"} 4
 "#;
         let actual = remove_zero_metrics(actual.as_bytes()).unwrap();
-        assert_eq!(expected, actual);
+        assert_eq!(expected.as_bytes(), &actual[..]);
     }
 
     #[tokio::test]
