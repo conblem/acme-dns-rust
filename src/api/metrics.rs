@@ -123,15 +123,16 @@ fn internal_server_error_and_trace<E: Display>(error: &E) -> WarpResponse {
         .into_response()
 }
 
-fn remove_zero_metrics(mut data: &[u8]) -> Result<String, IoError> {
-    let mut res = String::with_capacity(data.len());
+// we could use a string here and read_line but this would require checking for utf8
+fn remove_zero_metrics(mut data: &[u8]) -> Result<Vec<u8>, IoError> {
+    let mut res = Vec::with_capacity(data.len());
     loop {
-        let len = match data.read_line(&mut res) {
+        let len = match data.read_until(b'\n', &mut res) {
             Ok(0) => break Ok(res),
             Ok(len) => len,
             Err(e) => break Err(e),
         };
-        if res.ends_with(" 0\n") | res.ends_with(" 0") {
+        if res.ends_with(b" 0\n") | res.ends_with(b" 0") {
             res.truncate(res.len() - len);
         }
     }
