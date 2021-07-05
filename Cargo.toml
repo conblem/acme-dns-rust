@@ -21,7 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 sqlx = { version = "0.5", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
-tokio = { version = "1.7", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
+tokio = { version = "1.8", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = "0.6"
 tokio-rustls = "0.22"
