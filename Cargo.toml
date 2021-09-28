@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 hyper = { version = "0.14", features = ["stream", "http1", "http2", "server", "runtime"] }
 lazy_static = "1.4"
-prometheus = "0.12"
+prometheus = "0.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
 tracing-futures = { version = "0.2", features = ["futures-03"] }
