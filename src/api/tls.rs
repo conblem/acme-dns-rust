@@ -2,8 +2,9 @@ use anyhow::{anyhow, Result};
 use futures_util::stream::{repeat, Stream};
 use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::RwLock;
-use rustls::internal::pemfile::{certs, rsa_private_keys};
-use rustls::{NoClientAuth, ServerConfig};
+use rustls::server::ResolvesServerCertUsingSni;
+use rustls::{Certificate, PrivateKey, ServerConfig};
+use rustls_pemfile::{certs, rsa_private_keys};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
@@ -78,7 +79,11 @@ fn acceptor<F>(
 where
     F: CertFacade + 'static,
 {
-    let server_config = ServerConfig::new(NoClientAuth::new());
+    let empty_cert_resolver = ResolvesServerCertUsingSni::new();
+    let server_config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(empty_cert_resolver));
 
     let config = RwLock::new((None, Arc::new(server_config)));
     let wrapper = Arc::new((facade, config));
@@ -140,14 +145,23 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
         rsa_private_keys(&mut private.as_bytes()).map_err(|_| anyhow!("Private is invalid"))?;
     let private = privates
         .pop()
+        .map(PrivateKey)
         .ok_or_else(|| anyhow!("Private Vec is empty"))?;
 
-    let cert = certs(&mut cert.as_bytes()).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
+    let cert = certs(&mut cert.as_bytes())
+        .map_err(|_| anyhow!("Cert is invalid {:?}", cert))?
+        .into_iter()
+        .map(Certificate)
+        .collect();
 
-    let mut config = ServerConfig::new(NoClientAuth::new());
-    config.set_single_cert(cert, private)?;
+    let mut config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert, private)?;
+
     // used to enable http2 support
-    config.set_protocols(&["h2".into(), "http/1.1".into()]);
+    config.alpn_protocols.push("h2".into());
+    config.alpn_protocols.push("http/1.1".into());
 
     Ok(Arc::new(config))
 }
