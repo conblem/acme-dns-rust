@@ -184,7 +184,7 @@ impl CertFacade for DatabaseFacade<Postgres> {
         match CertFacadeDatabase::first_cert(self, &mut transaction).await? {
             Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
                 memory_cert.state = State::Ok;
-                CertFacadeDatabase::update_cert(self, &self.pool, &memory_cert).await?;
+                CertFacadeDatabase::update_cert(self, &self.pool, memory_cert).await?;
             }
             _ => {}
         }
@@ -275,7 +275,7 @@ impl CertFacade for InMemoryFacade {
         match CertFacadeMemory::first_cert(self, &mut transaction) {
             Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
                 memory_cert.state = State::Ok;
-                CertFacadeMemory::update_cert(self, &mut transaction, &memory_cert);
+                CertFacadeMemory::update_cert(self, &mut transaction, memory_cert);
             }
             _ => {}
         }
