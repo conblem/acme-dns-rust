@@ -41,7 +41,7 @@ async-trait = "0.1"
 
 [dev-dependencies]
 serde_test = "1.0"
-tracing-test = "0.1"
+tracing-test = "0.2"
 tokio-test = "0.4"
 testcontainers = "0.12"
 
