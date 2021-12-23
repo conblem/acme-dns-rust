@@ -49,7 +49,7 @@ pub(crate) fn wrap(
             let span_clone = span.clone();
 
             async move {
-                match conn.real_addr().await {
+                match Pin::new(&mut conn).real_addr().await {
                     Ok(Some(addr)) => {
                         span.record("remote.real", &display(addr));
                     }
@@ -96,10 +96,10 @@ pin_project! {
 
 impl<T> ProxyStream<T>
 where
-    T: AsyncRead + Unpin,
+    T: AsyncRead,
 {
-    fn real_addr(&mut self) -> RealAddrFuture<'_, T> {
-        RealAddrFuture { proxy_stream: self }
+    async fn real_addr(self: Pin<&mut Self>) -> IoResult<Option<SocketAddr>> {
+        RealAddrFuture { proxy_stream: self }.await
     }
 }
 
@@ -150,41 +150,13 @@ where
 }
 
 struct RealAddrFuture<'a, T> {
-    proxy_stream: &'a mut ProxyStream<T>,
-}
-
-fn format_header(res: Header) -> IoResult<SocketAddr> {
-    let addr = match res.addresses {
-        Addresses::IPv4 {
-            source_address,
-            source_port,
-            ..
-        } => {
-            let port = source_port.unwrap_or_default();
-            SocketAddrV4::new(source_address.into(), port).into()
-        }
-        Addresses::IPv6 {
-            source_address,
-            source_port,
-            ..
-        } => {
-            let port = source_port.unwrap_or_default();
-            SocketAddrV6::new(source_address.into(), port, 0, 0).into()
-        }
-        address => {
-            return Err(IoError::new(
-                ErrorKind::Other,
-                format!("Cannot convert {:?} to a SocketAddr", address),
-            ))
-        }
-    };
-
-    Ok(addr)
+    proxy_stream: Pin<&'a mut ProxyStream<T>>,
 }
 
 impl<'a, T> RealAddrFuture<'a, T> {
     fn get_header(&mut self) -> Poll<IoResult<Option<SocketAddr>>> {
-        let data = match &mut self.proxy_stream.data {
+        let proxy_stream = self.proxy_stream.as_mut().project();
+        let data = match proxy_stream.data {
             Some(data) => data,
             None => unreachable!("Future cannot be pulled anymore"),
         };
@@ -198,31 +170,60 @@ impl<'a, T> RealAddrFuture<'a, T> {
                 )))
             }
             Ok((remaining, res)) => {
-                self.proxy_stream.start_of_data = data.len() - remaining.len();
+                *proxy_stream.start_of_data = data.len() - remaining.len();
                 res
             }
         };
 
-        Poll::Ready(format_header(res).map(Some))
+        Poll::Ready(Self::format_header(res).map(Some))
+    }
+
+    fn format_header(res: Header) -> IoResult<SocketAddr> {
+        let addr = match res.addresses {
+            Addresses::IPv4 {
+                source_address,
+                source_port,
+                ..
+            } => {
+                let port = source_port.unwrap_or_default();
+                SocketAddrV4::new(source_address.into(), port).into()
+            }
+            Addresses::IPv6 {
+                source_address,
+                source_port,
+                ..
+            } => {
+                let port = source_port.unwrap_or_default();
+                SocketAddrV6::new(source_address.into(), port, 0, 0).into()
+            }
+            address => {
+                return Err(IoError::new(
+                    ErrorKind::Other,
+                    format!("Cannot convert {:?} to a SocketAddr", address),
+                ))
+            }
+        };
+
+        Ok(addr)
     }
 }
 
 impl<T> Future for RealAddrFuture<'_, T>
 where
-    T: AsyncRead + Unpin,
+    T: AsyncRead,
 {
     type Output = IoResult<Option<SocketAddr>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        let proxy_stream = this.proxy_stream.as_mut().project();
 
-        let data = match &mut this.proxy_stream.data {
+        let data = match proxy_stream.data {
             Some(data) => data,
             None => return Poll::Ready(Ok(None)),
         };
 
-        let stream = Pin::new(&mut this.proxy_stream.stream);
-        match ready!(poll_read_buf(stream, cx, data)) {
+        match ready!(poll_read_buf(proxy_stream.stream, cx, data)) {
             Ok(0) => {
                 return Poll::Ready(Err(IoError::new(
                     ErrorKind::UnexpectedEof,
