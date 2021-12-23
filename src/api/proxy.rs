@@ -1,5 +1,6 @@
 use futures_util::stream::Stream;
 use futures_util::{ready, TryStreamExt};
+use pin_project_lite::pin_project;
 use ppp::error::ParseError;
 use ppp::model::{Addresses, Header};
 use std::future::Future;
@@ -13,7 +14,6 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::io::poll_read_buf;
 use tracing::field::{debug, display};
 use tracing::{error, Instrument, Span};
-use pin_project_lite::pin_project;
 
 use crate::config::ProxyProtocol;
 
@@ -124,11 +124,7 @@ impl<T> AsyncWrite for ProxyStream<T>
 where
     T: AsyncWrite,
 {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<IoResult<usize>> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
         self.project().stream.poll_write(cx, buf)
     }
 
