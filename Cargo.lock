@@ -14,6 +14,7 @@ dependencies = [
  "hyper",
  "lazy_static",
  "parking_lot",
+ "pin-project-lite",
  "ppp",
  "prometheus",
  "rustls",

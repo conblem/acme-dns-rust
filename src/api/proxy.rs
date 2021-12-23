@@ -13,6 +13,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::io::poll_read_buf;
 use tracing::field::{debug, display};
 use tracing::{error, Instrument, Span};
+use pin_project_lite::pin_project;
 
 use crate::config::ProxyProtocol;
 
@@ -84,10 +85,13 @@ where
     }
 }
 
-struct ProxyStream<T> {
-    stream: T,
-    data: Option<Vec<u8>>,
-    start_of_data: usize,
+pin_project! {
+    struct ProxyStream<T> {
+        #[pin]
+        stream: T,
+        data: Option<Vec<u8>>,
+        start_of_data: usize,
+    }
 }
 
 impl<T> ProxyStream<T>
@@ -101,47 +105,47 @@ where
 
 impl<T> AsyncRead for ProxyStream<T>
 where
-    T: AsyncRead + Unpin,
+    T: AsyncRead,
 {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<IoResult<()>> {
-        let this = self.get_mut();
+        let this = self.project();
         if let Some(data) = this.data.take() {
-            buf.put_slice(&data[this.start_of_data..])
+            buf.put_slice(&data[*this.start_of_data..])
         }
-        Pin::new(&mut this.stream).poll_read(cx, buf)
+        this.stream.poll_read(cx, buf)
     }
 }
 
 impl<T> AsyncWrite for ProxyStream<T>
 where
-    T: AsyncWrite + Unpin,
+    T: AsyncWrite,
 {
     fn poll_write(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<IoResult<usize>> {
-        Pin::new(&mut self.stream).poll_write(cx, buf)
+        self.project().stream.poll_write(cx, buf)
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
-        Pin::new(&mut self.stream).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        self.project().stream.poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
-        Pin::new(&mut self.stream).poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        self.project().stream.poll_shutdown(cx)
     }
 
     fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
     ) -> Poll<IoResult<usize>> {
-        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
+        self.project().stream.poll_write_vectored(cx, bufs)
     }
 
     fn is_write_vectored(&self) -> bool {
