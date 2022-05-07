@@ -18,6 +18,8 @@ pub struct Dns<A> {
     span: Span,
 }
 
+// span setup here makes no sense
+// todo: fix this
 impl<A: ToSocketAddrs> Dns<A> {
     pub fn new(addr: A, authority: Box<dyn AuthorityObject>) -> Self {
         let span = info_span!("DNS::spawn", local.addr = Empty);

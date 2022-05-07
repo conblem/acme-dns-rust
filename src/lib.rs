@@ -25,7 +25,7 @@ pub mod util;
 
 static MIGRATOR: Migrator = sqlx::migrate!("migrations/postgres");
 
-#[tracing::instrument(err)]
+#[tracing::instrument]
 pub fn run() -> Result<()> {
     let config_path = env::args().nth(1);
     let config = config::load_config(config_path)?;

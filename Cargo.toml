@@ -21,12 +21,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 sqlx = { version = "0.5", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
-tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
+tokio = { version = "1.18", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-util = "0.6"
+tokio-util = { version = "0.7", features = ["io"]}
 tokio-rustls = "0.22"
 uuid = { version = "0.8", features = ["v4"] }
-bcrypt = "0.10"
+bcrypt = "0.13"
 warp = { version = "0.3", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 acme-lib = "0.8"
@@ -43,7 +43,7 @@ async-trait = "0.1"
 serde_test = "1.0"
 tracing-test = "0.1"
 tokio-test = "0.4"
-testcontainers = "0.12"
+testcontainers = "0.13"
 
 [features]
 default = ["postgres"]

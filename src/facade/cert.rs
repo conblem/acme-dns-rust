@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::domain::{DomainFacadeDatabase, DomainFacadeMemory};
 use super::{DatabaseFacade, Domain, InMemoryFacade, InMemoryFacadeGuard};
-use crate::util::{now, to_i64, HOUR};
+use crate::util::{now, to_i64, HOUR_IN_SECONDS};
 
 #[derive(sqlx::Type, Debug, PartialEq, Clone)]
 #[repr(i32)]
@@ -149,12 +149,14 @@ impl CertFacade for DatabaseFacade<Postgres> {
                 CertFacadeDatabase::update_cert(self, &mut transaction, &cert).await?;
                 Some(cert)
             }
+            // cert is in updating state as there are only to cert.state
             Some(mut cert) => {
                 let now = to_i64(&now());
-                let one_hour_ago = now - HOUR as i64;
+                let one_hour_ago = now - HOUR_IN_SECONDS as i64;
                 // longer ago than 1 hour so probably timed out
                 if cert.update < one_hour_ago {
                     cert.update = now;
+                    // todo: dont think this is needed
                     cert.state = State::Updating;
                     CertFacadeDatabase::update_cert(self, &mut transaction, &cert).await?;
                     Some(cert)
@@ -182,6 +184,7 @@ impl CertFacade for DatabaseFacade<Postgres> {
         let mut transaction = self.pool.begin().await?;
 
         match CertFacadeDatabase::first_cert(self, &mut transaction).await? {
+            // only stop cert if the update times match and no other interval picked up the job
             Some(cert) if cert.state == State::Updating && cert.update == memory_cert.update => {
                 memory_cert.state = State::Ok;
                 CertFacadeDatabase::update_cert(self, &self.pool, &memory_cert).await?;
@@ -244,7 +247,7 @@ impl CertFacade for InMemoryFacade {
             }
             Some(mut cert) => {
                 let now = to_i64(&now());
-                let one_hour_ago = now - HOUR as i64;
+                let one_hour_ago = now - HOUR_IN_SECONDS as i64;
                 // longer ago than 1 hour so probably timed out
                 if cert.update < one_hour_ago {
                     cert.update = now;
