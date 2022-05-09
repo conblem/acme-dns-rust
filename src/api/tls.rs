@@ -104,7 +104,7 @@ impl EmptyCertResolver {
 
 impl ResolvesServerCert for EmptyCertResolver {
     fn resolve(&self, _client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
-        return None;
+        None
     }
 }
 

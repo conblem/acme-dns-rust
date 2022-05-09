@@ -47,7 +47,7 @@ impl RequestHandler for TraceRequestHandler {
 
         let res = self
             .catalog
-            .handle_request(&request, response_handle)
+            .handle_request(request, response_handle)
             .instrument(span)
             .await;
 

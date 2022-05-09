@@ -2,6 +2,7 @@ use futures_util::{future, stream, StreamExt};
 use rustls::client::{ServerCertVerified, ServerCertVerifier};
 use rustls::{Certificate, ClientConfig, Error, ServerName};
 use std::convert::TryFrom;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -11,46 +12,38 @@ use acme_dns_rust::api::tls;
 use acme_dns_rust::facade::{Cert, CertFacade, InMemoryFacade, State};
 use acme_dns_rust::util::{now, to_i64};
 use std::time::SystemTime;
+use tokio_rustls::webpki::{
+    EndEntityCert, Time, TlsServerTrustAnchors, TrustAnchor, RSA_PKCS1_2048_8192_SHA256,
+};
 
 struct TestVerifier;
-
-/*impl ServerCertVerifier for TestVerifier {
-    fn verify_server_cert(
-        &self,
-        _roots: &RootCertStore,
-        certs: &[Certificate],
-        dns_name: DNSNameRef<'_>,
-        _ocsp_response: &[u8],
-    ) -> Result<ServerCertVerified, Error> {
-        /*let ca = rustls_pemfile::certs(&mut &include_bytes!("./ca.crt")[..]).unwrap();
-        let anchor = [cert_der_as_trust_anchor(ca[0].as_ref()).unwrap()];
-        let anchor = TLSServerTrustAnchors(&anchor);
-
-        let cert = certs[0].as_ref();
-        let cert = EndEntityCert::from(cert).unwrap();
-        let time = Time::try_from(SystemTime::now()).unwrap();
-        cert.verify_is_valid_tls_server_cert(&[&RSA_PKCS1_2048_8192_SHA256], &anchor, &[], time)
-            .unwrap();
-
-        let domain = DNSNameRef::try_from_ascii_str("acme-dns-rust.com").unwrap();
-        assert_eq!(domain.to_owned(), dns_name.to_owned());
-
-        Ok(ServerCertVerified::assertion())*/
-        todo!()
-    }
-}*/
 
 impl ServerCertVerifier for TestVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &Certificate,
+        end_entity: &Certificate,
         _intermediates: &[Certificate],
         _server_name: &ServerName,
         _scts: &mut dyn Iterator<Item = &[u8]>,
         _ocsp_response: &[u8],
         _now: SystemTime,
     ) -> Result<ServerCertVerified, Error> {
-        todo!()
+        let ca = rustls_pemfile::certs(&mut &include_bytes!("./ca.crt")[..]).unwrap();
+        let anchor = TrustAnchor::try_from_cert_der(ca[0].deref()).unwrap();
+        let anchor = &[anchor];
+
+        let anchor = TlsServerTrustAnchors(anchor);
+
+        let cert = EndEntityCert::try_from(end_entity.as_ref()).unwrap();
+
+        let time = Time::try_from(SystemTime::now()).unwrap();
+        cert.verify_is_valid_tls_server_cert(&[&RSA_PKCS1_2048_8192_SHA256], &anchor, &[], time)
+            .unwrap();
+
+        /*let domain = DNSNameRef::try_from_ascii_str("acme-dns-rust.com").unwrap();
+        assert_eq!(domain.to_owned(), dns_name.to_owned());*/
+
+        Ok(ServerCertVerified::assertion())
     }
 }
 
