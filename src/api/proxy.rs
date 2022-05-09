@@ -240,6 +240,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::api::proxy::RealAddrFuture;
     use futures_util::future;
     use ppp::model::{Addresses, Command, Header, Protocol, Version};
     use std::io::{Error as IoError, ErrorKind, IoSlice, Result as IoResult};
@@ -247,7 +248,6 @@ mod tests {
     use std::pin::Pin;
     use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use tokio_test::io::Builder;
-    use crate::api::proxy::RealAddrFuture;
 
     use super::{RemoteAddr, ToProxyStream};
     use crate::config::ProxyProtocol;

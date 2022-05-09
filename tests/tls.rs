@@ -1,7 +1,7 @@
-use std::convert::TryFrom;
 use futures_util::{future, stream, StreamExt};
-use rustls::{Certificate, ClientConfig, RootCertStore, Error, ServerName};
 use rustls::client::{ServerCertVerified, ServerCertVerifier};
+use rustls::{Certificate, ClientConfig, Error, RootCertStore, ServerName};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -44,7 +44,15 @@ struct TestVerifier;
 }*/
 
 impl ServerCertVerifier for TestVerifier {
-    fn verify_server_cert(&self, end_entity: &Certificate, intermediates: &[Certificate], server_name: &ServerName, scts: &mut dyn Iterator<Item=&[u8]>, ocsp_response: &[u8], now: SystemTime) -> Result<ServerCertVerified, Error> {
+    fn verify_server_cert(
+        &self,
+        end_entity: &Certificate,
+        intermediates: &[Certificate],
+        server_name: &ServerName,
+        scts: &mut dyn Iterator<Item = &[u8]>,
+        ocsp_response: &[u8],
+        now: SystemTime,
+    ) -> Result<ServerCertVerified, Error> {
         todo!()
     }
 }
@@ -81,7 +89,10 @@ async fn test() {
 
     let client_future = tokio::spawn(async move {
         let client = TcpStream::connect(addr).await.unwrap();
-        let mut client_config = ClientConfig::builder().with_safe_defaults().with_custom_certificate_verifier(Arc::new(TestVerifier)).with_no_client_auth();
+        let mut client_config = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_custom_certificate_verifier(Arc::new(TestVerifier))
+            .with_no_client_auth();
 
         let connector = TlsConnector::from(Arc::new(client_config));
 
