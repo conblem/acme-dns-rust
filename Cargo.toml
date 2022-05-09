@@ -33,7 +33,8 @@ acme-lib = "0.8"
 trust-dns-server = { version = "0.21", features = ["resolver", "dns-over-rustls", "dns-over-https-rustls"] }
 parking_lot = "0.12"
 futures-util = "0.3"
-rustls = "0.20"
+# only use this feature in test config
+rustls = { version = "0.20", features = ["dangerous_configuration"]}
 # update in the future 1.0 is already released
 rustls-pemfile = "0.3.0"
 toml = "0.5"

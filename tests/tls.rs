@@ -1,7 +1,7 @@
+use std::convert::TryFrom;
 use futures_util::{future, stream, StreamExt};
-use rustls::{
-    Certificate, ClientConfig, RootCertStore, ServerCertVerified, ServerCertVerifier, TLSError,
-};
+use rustls::{Certificate, ClientConfig, RootCertStore, Error, ServerName};
+use rustls::client::{ServerCertVerified, ServerCertVerifier};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -13,21 +13,19 @@ use tokio_rustls::TlsConnector;
 use acme_dns_rust::api::tls;
 use acme_dns_rust::facade::{Cert, CertFacade, InMemoryFacade, State};
 use acme_dns_rust::util::{now, to_i64};
-use rustls::internal::pemfile;
 use std::time::SystemTime;
-use tokio_rustls::webpki::trust_anchor_util::cert_der_as_trust_anchor;
 
 struct TestVerifier;
 
-impl ServerCertVerifier for TestVerifier {
+/*impl ServerCertVerifier for TestVerifier {
     fn verify_server_cert(
         &self,
         _roots: &RootCertStore,
         certs: &[Certificate],
         dns_name: DNSNameRef<'_>,
         _ocsp_response: &[u8],
-    ) -> Result<ServerCertVerified, TLSError> {
-        let ca = pemfile::certs(&mut &include_bytes!("./ca.crt")[..]).unwrap();
+    ) -> Result<ServerCertVerified, Error> {
+        /*let ca = rustls_pemfile::certs(&mut &include_bytes!("./ca.crt")[..]).unwrap();
         let anchor = [cert_der_as_trust_anchor(ca[0].as_ref()).unwrap()];
         let anchor = TLSServerTrustAnchors(&anchor);
 
@@ -40,7 +38,14 @@ impl ServerCertVerifier for TestVerifier {
         let domain = DNSNameRef::try_from_ascii_str("acme-dns-rust.com").unwrap();
         assert_eq!(domain.to_owned(), dns_name.to_owned());
 
-        Ok(ServerCertVerified::assertion())
+        Ok(ServerCertVerified::assertion())*/
+        todo!()
+    }
+}*/
+
+impl ServerCertVerifier for TestVerifier {
+    fn verify_server_cert(&self, end_entity: &Certificate, intermediates: &[Certificate], server_name: &ServerName, scts: &mut dyn Iterator<Item=&[u8]>, ocsp_response: &[u8], now: SystemTime) -> Result<ServerCertVerified, Error> {
+        todo!()
     }
 }
 
@@ -76,14 +81,11 @@ async fn test() {
 
     let client_future = tokio::spawn(async move {
         let client = TcpStream::connect(addr).await.unwrap();
-        let mut client_config = ClientConfig::new();
-        client_config
-            .dangerous()
-            .set_certificate_verifier(Arc::new(TestVerifier {}));
+        let mut client_config = ClientConfig::builder().with_safe_defaults().with_custom_certificate_verifier(Arc::new(TestVerifier)).with_no_client_auth();
 
         let connector = TlsConnector::from(Arc::new(client_config));
 
-        let domain = DNSNameRef::try_from_ascii_str("acme-dns-rust.com").unwrap();
+        let domain = ServerName::try_from("acme-dns-rust.com").unwrap();
         let mut conn = connector.connect(domain, client).await.unwrap();
         conn.write_all("Test".as_ref()).await.unwrap();
         conn.write(&[]).await.unwrap();

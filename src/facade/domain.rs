@@ -155,7 +155,6 @@ impl DomainFacade for InMemoryFacade {
 mod tests {
     use testcontainers::clients::Cli;
     use testcontainers::images::postgres::Postgres;
-    use testcontainers::Docker;
 
     use super::{DatabaseFacade, Domain, DomainFacade};
     use crate::setup_database;
@@ -168,7 +167,7 @@ mod tests {
 
         let connection_string = &format!(
             "postgres://postgres:postgres@localhost:{}/postgres",
-            node.get_host_port(5432).unwrap()
+            node.get_host_port(5432)
         );
 
         let pool = setup_database(connection_string).await.unwrap();

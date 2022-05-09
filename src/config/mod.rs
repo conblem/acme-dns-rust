@@ -87,7 +87,7 @@ mod tests {
         let redacted_config =
             format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
         // make sure redaction worked
-        assert_eq!(config.len() > redacted_config.len());
+        assert!(config.len() > redacted_config.len());
         assert!(logs_contain(&config));
     }
 

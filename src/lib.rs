@@ -101,7 +101,7 @@ mod tests {
 
         let connection_string = &format!(
             "postgres://postgres:postgres@localhost:{}/postgres",
-            node.get_host_port(5432).unwrap()
+            node.get_host_port(5432)
         );
 
         let pool = setup_database(connection_string).await.unwrap();

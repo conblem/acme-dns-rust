@@ -247,13 +247,16 @@ mod tests {
     use std::pin::Pin;
     use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use tokio_test::io::Builder;
+    use crate::api::proxy::RealAddrFuture;
 
-    use super::{format_header, RemoteAddr, ToProxyStream};
+    use super::{RemoteAddr, ToProxyStream};
     use crate::config::ProxyProtocol;
 
     #[tokio::test]
     async fn test_disabled() {
         let mut proxy_stream = Builder::new().build().source(ProxyProtocol::Disabled);
+        let proxy_stream = Pin::new(&mut proxy_stream);
+
         assert!(proxy_stream.real_addr().await.unwrap().is_none());
     }
 
@@ -277,9 +280,10 @@ mod tests {
         let mut header = ppp::to_bytes(generate_ipv4()).unwrap();
         header.extend_from_slice("Test".as_ref());
 
-        let proxy_stream = &mut &mut header.source(ProxyProtocol::Enabled);
+        let mut proxy_stream = header.source(ProxyProtocol::Enabled);
+        let mut proxy_stream = Pin::new(&mut proxy_stream);
 
-        let actual = proxy_stream.real_addr().await.unwrap().unwrap();
+        let actual = proxy_stream.as_mut().real_addr().await.unwrap().unwrap();
 
         assert_eq!(SocketAddr::from(([1, 1, 1, 1], 24034)), actual);
 
@@ -294,7 +298,8 @@ mod tests {
     async fn test_incomplete() {
         let header = ppp::to_bytes(generate_ipv4()).unwrap();
 
-        let header = &mut &mut header[..10].source(ProxyProtocol::Enabled);
+        let mut header = header[..10].source(ProxyProtocol::Enabled);
+        let header = Pin::new(&mut header);
         let actual = header.real_addr().await.unwrap_err();
 
         assert_eq!(
@@ -306,7 +311,8 @@ mod tests {
     #[tokio::test]
     async fn test_failure() {
         let invalid = Vec::from("invalid header");
-        let invalid = &mut &mut invalid.source(ProxyProtocol::Enabled);
+        let mut invalid = invalid.source(ProxyProtocol::Enabled);
+        let invalid = Pin::new(&mut invalid);
 
         let actual = invalid.real_addr().await.unwrap_err();
         assert_eq!(format!("{}", actual), "Proxy Parser Error");
@@ -324,6 +330,7 @@ mod tests {
             builder.read_error(IoError::new(ErrorKind::Other, "Error on IO"));
             builder.build().source(ProxyProtocol::Enabled)
         };
+        let proxy_stream = Pin::new(&mut proxy_stream);
 
         let error = proxy_stream.real_addr().await.unwrap_err();
         assert_eq!("Error on IO", format!("{}", error));
@@ -334,7 +341,7 @@ mod tests {
         let address = [1, 1, 1, 1, 1, 1, 1, 1];
         let addresses = Addresses::from((address, address, 24034, 443));
 
-        let actual = format_header(generate_header(addresses)).unwrap();
+        let actual = RealAddrFuture::<()>::format_header(generate_header(addresses)).unwrap();
         assert_eq!(SocketAddr::from((address, 24034)), actual);
 
         let address = [
@@ -342,7 +349,7 @@ mod tests {
         ];
         let addresses = Addresses::from((address, address));
 
-        assert!(format_header(generate_header(addresses)).is_err());
+        assert!(RealAddrFuture::<()>::format_header(generate_header(addresses)).is_err());
     }
 
     #[test]

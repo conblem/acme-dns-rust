@@ -291,7 +291,6 @@ impl CertFacade for InMemoryFacade {
 pub(crate) mod tests {
     use testcontainers::clients::Cli;
     use testcontainers::images::postgres::Postgres;
-    use testcontainers::Docker;
 
     use super::{Cert, CertFacade, DatabaseFacade, State};
     use crate::setup_database;
@@ -317,7 +316,7 @@ pub(crate) mod tests {
 
         let connection_string = &format!(
             "postgres://postgres:postgres@localhost:{}/postgres",
-            node.get_host_port(5432).unwrap()
+            node.get_host_port(5432)
         );
 
         let pool = setup_database(connection_string).await.unwrap();
