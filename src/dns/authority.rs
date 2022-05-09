@@ -7,7 +7,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
 use tracing::{debug, error, info, Instrument, Span};
-use trust_dns_server::authority::{Authority, AuthorityObject, LookupError, LookupOptions, LookupRecords, MessageRequest, UpdateResult, ZoneType};
+use trust_dns_server::authority::{
+    Authority, AuthorityObject, LookupError, LookupOptions, LookupRecords, MessageRequest,
+    UpdateResult, ZoneType,
+};
 use trust_dns_server::client::rr::LowerName;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
