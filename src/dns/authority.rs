@@ -7,16 +7,14 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
 use tracing::{debug, error, info, Instrument, Span};
-use trust_dns_server::authority::{
-    AuthorityObject, BoxedLookupFuture, LookupObject, LookupRecords, MessageRequest, UpdateResult,
-    ZoneType,
-};
+use trust_dns_server::authority::{AuthorityObject, LookupError, LookupObject, LookupOptions, LookupRecords, MessageRequest, UpdateResult, ZoneType};
 use trust_dns_server::client::op::LowerQuery;
 use trust_dns_server::client::rr::LowerName;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
+use async_trait::async_trait;
 
 use crate::config::PreconfiguredRecords;
 use crate::facade::{CertFacade, Domain, DomainFacade};
@@ -149,6 +147,7 @@ impl<F: DomainFacade + CertFacade> DatabaseAuthorityInner<F> {
 }
 
 #[allow(dead_code)]
+#[async_trait]
 impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
     for DatabaseAuthority<F>
 {
@@ -164,7 +163,7 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
         false
     }
 
-    fn update(&self, _update: &MessageRequest) -> UpdateResult<bool> {
+    async fn update(&self, _update: &MessageRequest) -> UpdateResult<bool> {
         Ok(false)
     }
 
@@ -172,17 +171,16 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
         self.0.lower.clone()
     }
 
-    fn lookup(
+    async fn lookup(
         &self,
         _name: &LowerName,
         _rtype: RecordType,
-        _is_secure: bool,
-        _supported_algorithms: SupportedAlgorithms,
-    ) -> BoxedLookupFuture {
+        _options: LookupOptions
+    ) -> Result<Box<dyn LookupObject>, LookupError> {
         BoxedLookupFuture::empty()
     }
 
-    fn search(
+    async fn search(
         &self,
         query: &LowerQuery,
         _is_secure: bool,
