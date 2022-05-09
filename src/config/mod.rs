@@ -84,7 +84,8 @@ mod tests {
 
         // check if logs contain redacted db information
         let config = format!("{:?}", config);
-        let redacted_config = format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
+        let redacted_config =
+            format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
         // make sure redaction worked
         assert_eq!(config.len() > redacted_config.len());
         assert!(logs_contain(&config));

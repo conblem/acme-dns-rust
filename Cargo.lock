@@ -13,11 +13,11 @@ dependencies = [
  "futures-util",
  "hyper",
  "lazy_static",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.0",
  "ppp",
  "prometheus",
  "rustls 0.20.4",
- "rustls-pemfile 1.0.0",
+ "rustls-pemfile",
  "serde",
  "serde_test",
  "sqlx",
@@ -30,7 +30,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-futures",
- "tracing-subscriber",
+ "tracing-subscriber 0.3.11",
  "tracing-test",
  "trust-dns-server",
  "uuid",
@@ -1607,15 +1607,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustls-pemfile"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7522c9de787ff061458fe9a829dc790a3f5b22dc571694fc5883f448b94d9a9"
-dependencies = [
- "base64",
-]
-
-[[package]]
 name = "rustversion"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2364,7 +2355,6 @@ dependencies = [
  "chrono",
  "lazy_static",
  "matchers",
- "parking_lot 0.11.2",
  "regex",
  "serde",
  "serde_json",
@@ -2378,6 +2368,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-subscriber"
+version = "0.3.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bc28f93baff38037f64e6f43d34cfa1605f27a49c34e8a04c5e78b0babf2596"
+dependencies = [
+ "ansi_term",
+ "parking_lot 0.12.0",
+ "sharded-slab",
+ "smallvec",
+ "thread_local",
+ "tracing-core",
+ "tracing-log",
+]
+
+[[package]]
 name = "tracing-test"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2385,7 +2390,7 @@ checksum = "a3b48778c2d401c6a7fcf38a0e3c55dc8e8e753cbd381044a8cdb6fd69a29f53"
 dependencies = [
  "lazy_static",
  "tracing-core",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
  "tracing-test-macro",
 ]
 
@@ -2446,7 +2451,7 @@ dependencies = [
  "rand",
  "ring",
  "rustls 0.20.4",
- "rustls-pemfile 0.3.0",
+ "rustls-pemfile",
  "serde",
  "smallvec",
  "thiserror",

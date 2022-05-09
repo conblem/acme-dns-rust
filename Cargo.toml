@@ -18,7 +18,7 @@ hyper = { version = "0.14", features = ["stream", "http1", "http2", "server", "r
 lazy_static = "1.4"
 prometheus = "0.13"
 tracing = "0.1"
-tracing-subscriber = { version = "0.2", features = ["parking_lot"] }
+tracing-subscriber = { version = "0.3", features = ["parking_lot"] }
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 sqlx = { version = "0.5", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
 tokio = { version = "1.18", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
@@ -31,10 +31,11 @@ warp = { version = "0.3", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 acme-lib = "0.8"
 trust-dns-server = { version = "0.21", features = ["resolver", "dns-over-rustls", "dns-over-https-rustls"] }
-parking_lot = "0.11"
+parking_lot = "0.12"
 futures-util = "0.3"
 rustls = "0.20"
-rustls-pemfile = "1.0.0"
+# update in the future 1.0 is already released
+rustls-pemfile = "0.3.0"
 toml = "0.5"
 anyhow = "1.0"
 ppp = "1"

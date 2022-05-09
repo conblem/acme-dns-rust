@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use futures_util::TryFutureExt;
+use async_trait::async_trait;
 use std::io::{Error as IoError, ErrorKind};
 use std::net::IpAddr::V4;
 use std::str;
@@ -7,14 +7,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
 use tracing::{debug, error, info, Instrument, Span};
-use trust_dns_server::authority::{AuthorityObject, LookupError, LookupObject, LookupOptions, LookupRecords, MessageRequest, UpdateResult, ZoneType};
-use trust_dns_server::client::op::LowerQuery;
+use trust_dns_server::authority::{Authority, AuthorityObject, LookupError, LookupOptions, LookupRecords, MessageRequest, UpdateResult, ZoneType};
 use trust_dns_server::client::rr::LowerName;
 use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
-use async_trait::async_trait;
+use trust_dns_server::server::RequestInfo;
 
 use crate::config::PreconfiguredRecords;
 use crate::facade::{CertFacade, Domain, DomainFacade};
@@ -29,8 +28,9 @@ struct DatabaseAuthorityInner<F> {
     supported_algorithms: SupportedAlgorithms,
 }
 
-impl<F> DatabaseAuthority<F> {
-    pub fn new(facade: F, name: &str, records: PreconfiguredRecords) -> Box<Self> {
+// todo: find out if double arc is needed
+impl<F: DomainFacade + CertFacade + Send + Sync + 'static> DatabaseAuthority<F> {
+    pub fn new(facade: F, name: &str, records: PreconfiguredRecords) -> Box<dyn AuthorityObject> {
         // todo: remove unwrap
         let lower = LowerName::from(Name::from_str(name).unwrap());
         // todo: remove unwrap
@@ -42,7 +42,8 @@ impl<F> DatabaseAuthority<F> {
             supported_algorithms: SupportedAlgorithms::new(),
         };
 
-        Box::new(DatabaseAuthority(Arc::new(inner)))
+        let authority = Arc::new(DatabaseAuthority(Arc::new(inner)));
+        Box::new(authority)
     }
 }
 
@@ -113,8 +114,7 @@ impl<F: DomainFacade + CertFacade> DatabaseAuthorityInner<F> {
             Some(record_set) => {
                 debug!("pre lookup resolved: {:?}", record_set);
                 Ok(Some(LookupRecords::new(
-                    false,
-                    self.supported_algorithms,
+                    LookupOptions::default(),
                     record_set,
                 )))
             }
@@ -142,18 +142,14 @@ impl<F: DomainFacade + CertFacade> DatabaseAuthorityInner<F> {
         let record = Record::from_rdata(name, 100, RData::TXT(txt));
         let record = Arc::new(RecordSet::from(record));
 
-        Ok(LookupRecords::new(false, self.supported_algorithms, record))
+        Ok(LookupRecords::new(LookupOptions::default(), record))
     }
 }
 
 #[allow(dead_code)]
 #[async_trait]
-impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
-    for DatabaseAuthority<F>
-{
-    fn box_clone(&self) -> Box<(dyn AuthorityObject + 'static)> {
-        Box::new(DatabaseAuthority(Arc::clone(&self.0)))
-    }
+impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for DatabaseAuthority<F> {
+    type Lookup = LookupRecords;
 
     fn zone_type(&self) -> ZoneType {
         ZoneType::Primary
@@ -167,127 +163,104 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> AuthorityObject
         Ok(false)
     }
 
-    fn origin(&self) -> LowerName {
-        self.0.lower.clone()
+    fn origin(&self) -> &LowerName {
+        &self.0.lower
     }
 
     async fn lookup(
         &self,
         _name: &LowerName,
         _rtype: RecordType,
-        _options: LookupOptions
-    ) -> Result<Box<dyn LookupObject>, LookupError> {
-        BoxedLookupFuture::empty()
+        _options: LookupOptions,
+    ) -> Result<LookupRecords, LookupError> {
+        Ok(LookupRecords::Empty)
     }
 
     async fn search(
         &self,
-        query: &LowerQuery,
-        _is_secure: bool,
-        _supported_algorithms: SupportedAlgorithms,
-    ) -> BoxedLookupFuture {
+        request_info: RequestInfo<'_>,
+        _options: LookupOptions,
+    ) -> Result<LookupRecords, LookupError> {
         let authority = Arc::clone(&self.0);
-        let name = Name::from(query.name());
-        let query_type = query.query_type();
+        let name = Name::from(request_info.query.name());
+        let query_type = request_info.query.query_type();
         let span = Span::current();
         span.record("name", &display(&name));
         span.record("query_type", &display(&query_type));
 
         // not sure if this handling makes sense
         if query_type == RecordType::SOA {
-            return span.in_scope(|| self.soa());
+            return self.soa().await;
         }
 
-        BoxedLookupFuture::from(
-            async move {
-                info!("Starting lookup");
-                let first = match name.iter().next() {
-                    Some(first) => first,
-                    None => return Ok(LookupRecords::Empty),
-                };
+        info!("Starting lookup");
+        let first = match name.iter().next() {
+            Some(first) => first,
+            None => return Ok(LookupRecords::Empty),
+        };
 
-                if name.is_empty() {
-                    return Ok(LookupRecords::Empty);
-                }
+        if name.is_empty() {
+            return Ok(LookupRecords::Empty);
+        }
 
-                // no error handling needed we just try the other lookups
-                if let Ok(Some(pre)) = authority.lookup_pre(&name, &query_type).await {
-                    return Ok(pre);
-                }
+        // no error handling needed we just try the other lookups
+        if let Ok(Some(pre)) = authority.lookup_pre(&name, &query_type).await {
+            return Ok(pre);
+        }
 
-                if first == b"_acme-challenge" {
-                    return authority.acme_challenge(name).await.map_err(error);
-                }
+        if first == b"_acme-challenge" {
+            return authority.acme_challenge(name).await.map_err(error);
+        }
 
-                let first = match str::from_utf8(first) {
-                    Ok(first) => first,
-                    Err(e) => return Err(error(e)),
-                };
+        let first = match str::from_utf8(first) {
+            Ok(first) => first,
+            Err(e) => return Err(error(e)),
+        };
 
-                let txt = match authority.facade.find_domain_by_id(first).await {
-                    Ok(Some(Domain { txt: Some(txt), .. })) => txt,
-                    Ok(Some(Domain { txt: None, .. })) => return Ok(LookupRecords::Empty),
-                    Ok(None) => return Err(error(IoError::from(ErrorKind::NotFound))),
-                    Err(e) => return Err(error(e)),
-                };
-                let txt = TXT::new(vec![txt]);
-                let record = Record::from_rdata(name, 100, RData::TXT(txt));
-                let record_set = Arc::new(RecordSet::from(record));
+        let txt = match authority.facade.find_domain_by_id(first).await {
+            Ok(Some(Domain { txt: Some(txt), .. })) => txt,
+            Ok(Some(Domain { txt: None, .. })) => return Ok(LookupRecords::Empty),
+            Ok(None) => return Err(error(IoError::from(ErrorKind::NotFound))),
+            Err(e) => return Err(error(e)),
+        };
+        let txt = TXT::new(vec![txt]);
+        let record = Record::from_rdata(name, 100, RData::TXT(txt));
+        let record_set = Arc::new(RecordSet::from(record));
 
-                Ok(LookupRecords::new(
-                    false,
-                    authority.supported_algorithms,
-                    record_set,
-                ))
-            }
-            .map_ok(|res| Box::new(res) as Box<dyn LookupObject>)
-            .inspect_err(|err| error!("{}", err))
-            .instrument(span),
-        )
+        Ok(LookupRecords::new(LookupOptions::default(), record_set))
     }
 
-    fn get_nsec_records(
+    async fn get_nsec_records(
         &self,
         _name: &LowerName,
-        _is_secure: bool,
-        _supported_algorithms: SupportedAlgorithms,
-    ) -> BoxedLookupFuture {
-        BoxedLookupFuture::empty()
+        _options: LookupOptions,
+    ) -> Result<Self::Lookup, LookupError> {
+        Ok(LookupRecords::Empty)
     }
 
     // fix handling of this as this always take self.origin
     // also admin is always same serial numbers need to match
-    fn soa(&self) -> BoxedLookupFuture {
+    async fn soa(&self) -> Result<LookupRecords, LookupError> {
         let origin: Name = self.origin().into();
         let supported_algorithms = self.0.supported_algorithms;
-        BoxedLookupFuture::from(
-            async move {
-                let soa = SOA::new(
-                    origin.clone(),
-                    origin.clone(),
-                    1,
-                    28800,
-                    7200,
-                    604800,
-                    86400,
-                );
-                let record = Record::from_rdata(origin, 100, RData::SOA(soa));
-                let record_set = RecordSet::from(record);
-                let records =
-                    LookupRecords::new(false, supported_algorithms, Arc::from(record_set));
-                let records = Box::new(records) as Box<dyn LookupObject>;
-                Ok(records)
-            }
-            .in_current_span(),
-        )
+
+        let soa = SOA::new(
+            origin.clone(),
+            origin.clone(),
+            1,
+            28800,
+            7200,
+            604800,
+            86400,
+        );
+        let record = Record::from_rdata(origin, 100, RData::SOA(soa));
+        let record_set = Arc::new(record.into());
+
+        Ok(LookupRecords::new(LookupOptions::default(), record_set))
     }
 
-    fn soa_secure(
-        &self,
-        _is_secure: bool,
-        _supported_algorithms: SupportedAlgorithms,
-    ) -> BoxedLookupFuture {
-        self.soa()
+    async fn soa_secure(&self, _options: LookupOptions) -> Result<LookupRecords, LookupError> {
+        self.soa().await
     }
 }
 
