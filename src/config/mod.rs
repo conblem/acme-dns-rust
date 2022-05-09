@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs::read;
-use tracing::{debug, info, info_span};
+use tracing::{debug, info, info_span, trace};
 
 pub use listener::{Listener, ProxyProtocol};
 pub use records::PreconfiguredRecords;
@@ -49,14 +49,17 @@ const DEFAULT_CONFIG_PATH: &str = "config.toml";
 
 // is not async so we can use it to load settings for tokio runtime
 pub fn load_config(config_path: Option<String>) -> Result<Config> {
+    let choose_default = config_path.is_none();
     let config_path = config_path.as_deref().unwrap_or(DEFAULT_CONFIG_PATH);
 
-    let span = info_span!("load_config", config_path);
+    let span = info_span!("load_config", config_path, choose_default);
     let _enter = span.enter();
 
-    let file = read(config_path)?;
+    trace!("Start reading config file");
+    let file = read(config_path).with_context(|| format!("{{config_path={}}}", config_path))?;
     debug!(file_length = file.len(), "Read file");
 
+    trace!("Start deserializing config file");
     let config = toml::de::from_slice::<Config>(&file)?;
     // redact db information
     let config_str = format!("{:?}", config).replace(&config.general.db, "******");
@@ -80,7 +83,11 @@ mod tests {
         let config = load_config(Some(path)).unwrap();
 
         // check if logs contain redacted db information
-        let config = format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
+        let config = format!("{:?}", config);
+        let redacted_config =
+            format!("{:?}", config).replace("postgres://root@localhost/acme", "******");
+        // make sure redaction worked
+        assert_eq!(config.len() > redacted_config.len());
         assert!(logs_contain(&config));
     }
 

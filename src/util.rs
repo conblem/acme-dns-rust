@@ -13,7 +13,8 @@ pub const fn to_u64(val: &i64) -> u64 {
     u64::from_ne_bytes(val.to_ne_bytes())
 }
 
-pub(crate) const HOUR: u64 = 3600;
+pub(crate) const HOUR_IN_SECONDS: u64 = 3600;
+
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -21,6 +22,13 @@ pub fn now() -> u64 {
         .as_secs()
 }
 
+// this function is used to downcast error into different types
+// it takes anything that can be turned into a boxed error
+// this includes boxed errors, errors implementing std::error::Error
+// or for example strings
+// afterwards it tries to turn them into E using the least amount of overhead
+// all <dyn Any>::downcast_mut are evaluated at compile time and get removed
+// also wrapping the error in an option gets removed as well as it can be statically proven to always be some
 pub(crate) fn error<I, E>(err: I) -> E
 where
     I: Into<Box<dyn StdError + Send + Sync>> + 'static,
@@ -28,20 +36,25 @@ where
 {
     let mut err = Some(err);
 
+    // the input and output error are the same do nothing
     if let Some(err) = <dyn Any>::downcast_mut::<Option<E>>(&mut err) {
         return err.take().unwrap();
     }
 
+    // the input error is an IoError use From<IoError> of E to turn it into E
     if let Some(err) = <dyn Any>::downcast_mut::<Option<IoError>>(&mut err) {
         return err.take().unwrap().into();
     }
 
+    // The error is an anyhow error so we try to downcast the internal anyhow error first
     if let Some(err) = <dyn Any>::downcast_mut::<Option<Error>>(&mut err) {
+        // use to the anyhow downcast function to downcast directly to E
         let err = match err.take().unwrap().downcast::<E>() {
             Ok(err) => return err,
             Err(err) => err,
         };
 
+        // try to downcast the anyhow error into an IoError, same as before
         let err = match err.downcast::<IoError>() {
             Ok(err) => err,
             Err(err) => IoError::new(ErrorKind::Other, err),
@@ -49,6 +62,7 @@ where
         return err.into();
     }
 
+    // if all else fails use IoError::new which takes anything that can be turned into a boxed error
     IoError::new(ErrorKind::Other, err.unwrap()).into()
 }
 

@@ -9,7 +9,7 @@ use tracing::{error, info, Instrument, Span};
 
 use crate::acme::DatabasePersist;
 use crate::facade::{Cert, CertFacade, Domain, DomainFacade};
-use crate::util::HOUR;
+use crate::util::HOUR_IN_SECONDS;
 
 #[derive(Clone)]
 pub struct CertManager<F> {
@@ -19,14 +19,14 @@ pub struct CertManager<F> {
 }
 
 fn interval() -> Interval {
-    tokio::time::interval(Duration::from_secs(HOUR))
+    tokio::time::interval(Duration::from_secs(HOUR_IN_SECONDS))
 }
 
 impl<F> CertManager<F>
 where
     F: DomainFacade + CertFacade + Clone + Send + Sync + 'static,
 {
-    #[tracing::instrument(name = "CertManager::new", skip(facade, persist))]
+    #[tracing::instrument(name = "CertManager::new", skip(facade, persist, runtime))]
     pub async fn new(
         facade: F,
         persist: DatabasePersist,
