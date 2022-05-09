@@ -6,6 +6,9 @@ use rustls::internal::pemfile::{certs, rsa_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 use std::future::Future;
 use std::sync::Arc;
+use rustls::Connection::Server;
+use rustls::server::{ClientHello, ResolvesServerCert};
+use rustls::sign::CertifiedKey;
 use tokio::io::{AsyncRead, AsyncWrite, Result as IoResult};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
@@ -78,7 +81,10 @@ fn acceptor<F>(
 where
     F: CertFacade + 'static,
 {
-    let server_config = ServerConfig::new(NoClientAuth::new());
+    let server_config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_cert_resolver(EmptyCertResolver::new());
 
     let config = RwLock::new((None, Arc::new(server_config)));
     let wrapper = Arc::new((facade, config));
@@ -88,6 +94,21 @@ where
         load_cert(facade, config).await
     }
 }
+
+struct EmptyCertResolver;
+
+impl EmptyCertResolver {
+    fn new() -> Arc<dyn ResolvesServerCert> {
+        Arc::new(EmptyCertResolver)
+    }
+}
+
+impl ResolvesServerCert for EmptyCertResolver {
+    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        return None
+    }
+}
+
 
 async fn load_cert<F>(
     facade: &F,
@@ -144,10 +165,12 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
 
     let cert = certs(&mut cert.as_bytes()).map_err(|_| anyhow!("Cert is invalid {:?}", cert))?;
 
-    let mut config = ServerConfig::new(NoClientAuth::new());
-    config.set_single_cert(cert, private)?;
+    let mut config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert, private)?;
     // used to enable http2 support
-    config.set_protocols(&["h2".into(), "http/1.1".into()]);
+    config.alpn_protocols = vec!["h2".into(), "http/1.1".into()];
 
     Ok(Arc::new(config))
 }
