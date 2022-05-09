@@ -6,13 +6,12 @@ use std::str;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::field::display;
-use tracing::{debug, error, info, Instrument, Span};
+use tracing::{debug, info, Span};
 use trust_dns_server::authority::{
     Authority, AuthorityObject, LookupError, LookupOptions, LookupRecords, MessageRequest,
     UpdateResult, ZoneType,
 };
 use trust_dns_server::client::rr::LowerName;
-use trust_dns_server::proto::rr::dnssec::SupportedAlgorithms;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
@@ -28,7 +27,6 @@ struct DatabaseAuthorityInner<F> {
     lower: LowerName,
     facade: F,
     records: PreconfiguredRecords,
-    supported_algorithms: SupportedAlgorithms,
 }
 
 // todo: find out if double arc is needed
@@ -42,7 +40,6 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> DatabaseAuthority<F> 
             lower,
             facade,
             records,
-            supported_algorithms: SupportedAlgorithms::new(),
         };
 
         let authority = Arc::new(DatabaseAuthority(Arc::new(inner)));
@@ -56,7 +53,7 @@ async fn lookup_cname(record_set: &RecordSet) -> Result<Option<Arc<RecordSet>>> 
     let records = record_set
         .records_without_rrsigs()
         .next()
-        .map(Record::rdata);
+        .and_then(Record::data);
 
     let cname = match records {
         Some(RData::CNAME(cname)) => cname,
@@ -179,6 +176,7 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
         Ok(LookupRecords::Empty)
     }
 
+    // todo: fix tracing
     async fn search(
         &self,
         request_info: RequestInfo<'_>,
@@ -245,7 +243,6 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
     // also admin is always same serial numbers need to match
     async fn soa(&self) -> Result<LookupRecords, LookupError> {
         let origin: Name = self.origin().into();
-        let supported_algorithms = self.0.supported_algorithms;
 
         let soa = SOA::new(
             origin.clone(),
@@ -291,8 +288,8 @@ mod tests {
             .expect("no records in recordset");
         assert_eq!(RecordType::A, record.record_type());
 
-        let ip = match record.rdata() {
-            RData::A(ip) => ip,
+        let ip = match record.data() {
+            Some(RData::A(ip)) => ip,
             _ => panic!("Resolved record is not of a type"),
         };
 

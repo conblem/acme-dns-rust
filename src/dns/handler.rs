@@ -1,14 +1,8 @@
 use async_trait::async_trait;
-use futures_util::future::{Join, Map, Ready};
-use futures_util::{future, FutureExt};
 use lazy_static::lazy_static;
-use prometheus::{register_histogram_vec, HistogramTimer, HistogramVec};
-use std::future::Future;
-use tracing::field::Empty;
-use tracing::instrument::Instrumented;
+use prometheus::{register_histogram_vec, HistogramVec};
 use tracing::{info_span, Instrument, Span};
 use trust_dns_server::authority::Catalog;
-use trust_dns_server::client::op::LowerQuery;
 use trust_dns_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 
 lazy_static! {
@@ -39,28 +33,26 @@ impl RequestHandler for TraceRequestHandler {
         request: &Request,
         response_handle: R,
     ) -> ResponseInfo {
-        /*let name = request
-            .message
-            .queries()
-            .first()
-            .map(LowerQuery::name)
-            .map(ToString::to_string);
+        let info = request.request_info();
+        let name = info.query.name().to_string();
+        let addr = info.src;
+        let query_type = info.query.query_type();
 
-        let name = name.as_ref().map(|name| [name.as_str()]);
+        let span =
+            info_span!(parent: &self.span, "request", remote.addr = %addr, %name, %query_type);
 
-        let name = match &name {
-            Some(name) => &name[..],
-            None => &[],
-        };
+        let timer = DNS_REQ_HISTOGRAM
+            .with_label_values(&[name.as_str()])
+            .start_timer();
 
-        let addr = request.src;
-        let span = info_span!(parent: &self.span, "request", remote.addr = %addr, name = Empty, query_type = Empty);
+        let res = self
+            .catalog
+            .handle_request(&request, response_handle)
+            .instrument(span)
+            .await;
 
-        let timer = DNS_REQ_HISTOGRAM.with_label_values(name).start_timer();
-        let handle_request = self.catalog.handle_request(&request, response_handle);
+        timer.observe_duration();
 
-        */
-
-        self.catalog.handle_request(&request, response_handle).await
+        res
     }
 }
