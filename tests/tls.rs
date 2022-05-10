@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use futures_util::{future, stream, StreamExt};
 use rustls::client::{ServerCertVerified, ServerCertVerifier, WebPkiVerifier};
 use rustls::{Certificate, ClientConfig, Error, RootCertStore, ServerName};
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsConnector;
-use anyhow::{anyhow, Result};
 
 use acme_dns_rust::api::tls;
 use acme_dns_rust::facade::{Cert, CertFacade, InMemoryFacade, State};
@@ -36,12 +36,19 @@ impl ServerCertVerifier for TestVerifier {
         ocsp_response: &[u8],
         now: SystemTime,
     ) -> Result<ServerCertVerified, Error> {
-        let res = self.0.verify_server_cert(end_entity, intermediates, server_name, scts, ocsp_response, now);
+        let res = self.0.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            scts,
+            ocsp_response,
+            now,
+        );
 
         // check if client sends correct sni name
         let name = match server_name {
             ServerName::DnsName(name) => name.as_ref(),
-            _ => unreachable!()
+            _ => unreachable!(),
         };
         assert_eq!("acme-dns-rust.com", name);
 
@@ -73,7 +80,11 @@ async fn test() -> Result<()> {
         let server = stream::iter(vec![Ok(future::ready(Ok(server)))]);
         let mut acceptor = tls::wrap(server, facade);
 
-        let mut conn = acceptor.next().await.ok_or_else(|| anyhow!("Acceptor finished"))??.await?;
+        let mut conn = acceptor
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("Acceptor finished"))??
+            .await?;
         let mut actual = String::new();
         let byte_read = conn.read_to_string(&mut actual).await?;
         assert_eq!(4, byte_read);
