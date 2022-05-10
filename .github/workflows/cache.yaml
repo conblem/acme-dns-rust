@@ -1,0 +1,12 @@
+name: Cache
+on:
+  schedule:
+    - cron: '0 * * * *'
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'PAGER=cat gh api -H "Accept: application/vnd.github.v3+json" /repos/$REPO/actions/cache/usage -q ".active_caches_size_in_bytes"'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
