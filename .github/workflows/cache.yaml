@@ -16,7 +16,7 @@ jobs:
           REPO: ${{ github.repository }}
       - uses: RubbaBoy/BYOB@v1.2.1
         with:
-          NAME: Cache size
+          NAME: size
           LABEL: 'Cache size'
           STATUS: ${{ steps.size.outputs.SIZE }}
           COLOR: 00EEFF
