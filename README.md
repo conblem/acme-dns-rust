@@ -1,6 +1,7 @@
 [![Build](https://github.com/conblem/acme-dns-rust/workflows/Rust/badge.svg)](https://github.com/conblem/acme-dns-rust/actions)
 [![codecov](https://codecov.io/gh/conblem/acme-dns-rust/branch/dev/graph/badge.svg)](https://codecov.io/gh/conblem/acme-dns-rust)
 [![crates.io](https://img.shields.io/crates/v/acme-dns-rust)](https://crates.io/crates/acme-dns-rust)
+![Cache Size](https://byob.yarr.is/conblem/acme-dns-rust/size/shields/shields.json)
 
 # Acme DNS Rust
 ### WIP!
