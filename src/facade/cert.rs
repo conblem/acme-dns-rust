@@ -302,8 +302,8 @@ pub(crate) mod tests {
             update: to_i64(&now()),
             state: State::Ok,
             // todo: this is the wrong cert and key only to fix compilation
-            cert: Some(include_str!("../../tests/ca.crt").to_owned()),
-            private: Some(include_str!("../../tests/cert.key").to_owned()),
+            cert: Some(include_str!("../../tests/leaf.crt").to_owned()),
+            private: Some(include_str!("../../tests/leaf.key").to_owned()),
             domain: "acme-dns-rust.com".to_owned(),
         }
     }
