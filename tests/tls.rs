@@ -48,7 +48,7 @@ impl ServerCertVerifier for TestVerifier {
         // check if client sends correct sni name
         let name = match server_name {
             ServerName::DnsName(name) => name.as_ref(),
-            _ => unreachable!(),
+            _ => return Err(Error::General("Wrong SNI".to_string())),
         };
         assert_eq!("acme-dns-rust.com", name);
 
