@@ -37,7 +37,7 @@ impl Cert {
     // remove expect
     fn new(domain: &Domain) -> Self {
         Cert {
-            id: Uuid::new_v4().to_simple().to_string(),
+            id: Uuid::new_v4().simple().to_string(),
             update: to_i64(&now()),
             state: State::Updating,
             cert: None,
