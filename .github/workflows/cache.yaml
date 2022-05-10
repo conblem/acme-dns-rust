@@ -18,6 +18,6 @@ jobs:
         with:
           NAME: size
           LABEL: 'Cache size'
-          STATUS: ${{ steps.size.outputs.SIZE }}
+          STATUS: ${{ steps.size.outputs.SIZE }} GB
           COLOR: 00EEFF
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
