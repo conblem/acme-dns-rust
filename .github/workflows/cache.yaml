@@ -8,7 +8,7 @@ jobs:
     steps:
       - run: |
           SIZE=$(PAGER=cat gh api -H "Accept: application/vnd.github.v3+json" /repos/$REPO/actions/cache/usage -q ".active_caches_size_in_bytes")
-          echo ::set-env name=TAG_NAME::$(bc <<< "scale=4; $SIZE / 1000000000")
+          echo ::set-output name=SIZE::$(bc <<< "scale=4; $SIZE / 1000000000")
         id: size
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
