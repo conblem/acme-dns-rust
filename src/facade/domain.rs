@@ -152,16 +152,25 @@ impl DomainFacade for InMemoryFacade {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use testcontainers::clients::Cli;
     use testcontainers::images::postgres::Postgres;
 
     use super::{DatabaseFacade, Domain, DomainFacade};
     use crate::setup_database;
 
-    #[cfg(not(feature = "disable-docker"))]
-    //#[tokio::test]
-    async fn _test_postgres_domain_facade() {
+    pub(crate) fn create_domain() -> Domain {
+        Domain {
+            id: "0e1f8297564a420eb260749d9f5ddd45".to_string(),
+            password: "$2b$12$zTUOFwfVurULlALrEHdn7OK0it3BRNy43FOb2Qos1PGOPd/YCPVg.".to_string(),
+            txt: Some("TXT Content".to_string()),
+            username: "6f791bc4494846ba997562c85d03b940".to_string(),
+        }
+    }
+
+    //#[cfg(not(feature = "disable-docker"))]
+    #[tokio::test]
+    async fn test_postgres_domain_facade() {
         let docker = Cli::default();
         let node = docker.run(Postgres::default());
 
@@ -173,22 +182,15 @@ mod tests {
         let pool = setup_database(connection_string).await.unwrap();
         let facade = DatabaseFacade::from(pool);
 
-        let id = "0e1f8297564a420eb260749d9f5ddd45".to_owned();
-        let mut domain = Domain {
-            id: id.clone(),
-            password: "$2b$12$zTUOFwfVurULlALrEHdn7OK0it3BRNy43FOb2Qos1PGOPd/YCPVg.".to_owned(),
-            txt: Some("TXT Content".to_owned()),
-            username: "6f791bc4494846ba997562c85d03b940".to_owned(),
-        };
-
+        let mut domain = create_domain();
         facade.create_domain(&domain).await.unwrap();
 
-        let actual = facade.find_domain_by_id(&id).await.unwrap().unwrap();
+        let actual = facade.find_domain_by_id(&domain.id).await.unwrap().unwrap();
         assert_eq!(domain, actual);
 
         domain.txt = Some("Another TXT Content".to_owned());
         facade.update_domain(&domain).await.unwrap();
-        let actual = facade.find_domain_by_id(&id).await.unwrap().unwrap();
+        let actual = facade.find_domain_by_id(&domain.id).await.unwrap().unwrap();
         assert_eq!(domain, actual);
     }
 }

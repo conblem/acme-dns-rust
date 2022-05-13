@@ -289,6 +289,7 @@ impl CertFacade for InMemoryFacade {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::facade::Domain;
     use testcontainers::clients::Cli;
     use testcontainers::images::postgres::Postgres;
 
@@ -296,7 +297,16 @@ pub(crate) mod tests {
     use crate::setup_database;
     use crate::util::{now, to_i64};
 
-    pub(crate) fn create_cert() -> Cert {
+    fn create_domain() -> Domain {
+        Domain {
+            id: "0e1f8297564a420eb260749d9f5ddd45".to_string(),
+            password: "$2b$12$zTUOFwfVurULlALrEHdn7OK0it3BRNy43FOb2Qos1PGOPd/YCPVg.".to_string(),
+            txt: Some("TXT Content".to_string()),
+            username: "6f791bc4494846ba997562c85d03b940".to_string(),
+        }
+    }
+
+    pub(crate) fn create_cert(domain: &Domain) -> Cert {
         Cert {
             id: "1".to_owned(),
             update: to_i64(&now()),
@@ -304,13 +314,13 @@ pub(crate) mod tests {
             // todo: this is the wrong cert and key only to fix compilation
             cert: Some(include_str!("../../tests/leaf.crt").to_owned()),
             private: Some(include_str!("../../tests/leaf.key").to_owned()),
-            domain: "acme-dns-rust.com".to_owned(),
+            domain: domain.id.clone(),
         }
     }
 
     #[cfg(not(feature = "disable-docker"))]
-    //#[tokio::test]
-    async fn _test_postgres_cert_facade() {
+    #[tokio::test]
+    async fn test_postgres_cert_facade() {
         let docker = Cli::default();
         let node = docker.run(Postgres::default());
 
@@ -321,7 +331,8 @@ pub(crate) mod tests {
 
         let pool = setup_database(connection_string).await.unwrap();
         let facade = DatabaseFacade::from(pool);
-        let mut cert = create_cert();
+        let domain = create_domain();
+        let mut cert = create_cert(&domain);
 
         facade.create_cert(&cert).await.unwrap();
 

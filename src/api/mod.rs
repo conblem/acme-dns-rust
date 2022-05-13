@@ -51,6 +51,7 @@ where
 
     loop {
         let span = info_span!("conn", remote.addr = Empty, remote.real = Empty);
+        // figure out if this instrument is needed
         let conn = match io.next().instrument(span.clone()).await {
             Some(Ok(conn)) => conn.err_into(),
             Some(Err(err)) => {
