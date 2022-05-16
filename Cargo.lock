@@ -15,7 +15,7 @@ dependencies = [
  "lazy_static",
  "parking_lot 0.12.0",
  "pin-project-lite",
- "ppp",
+ "ppp-stream",
  "prometheus",
  "rustls 0.20.4",
  "rustls-pemfile",
@@ -1330,11 +1330,23 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "ppp"
-version = "1.2.2"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc7c12f80d78a4f11883bef851dc51c5b66e53e36a483f024f7fe19416414473"
+checksum = "a414b922957c3ec8fd727c32241d39ffb52ec858c461485987bf9094c5bae653"
 dependencies = [
- "nom",
+ "thiserror",
+]
+
+[[package]]
+name = "ppp-stream"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830a5334ac0b1f36785dab1167c7bc7d26bf4a9eb107c6d17140439da54dde00"
+dependencies = [
+ "futures-util",
+ "ppp",
+ "tokio",
+ "tokio-util 0.7.1",
 ]
 
 [[package]]
