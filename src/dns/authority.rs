@@ -12,6 +12,7 @@ use trust_dns_server::authority::{
     UpdateResult, ZoneType,
 };
 use trust_dns_server::client::rr::LowerName;
+use trust_dns_server::proto::op::ResponseCode;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
@@ -163,8 +164,12 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
         Ok(false)
     }
 
+    // only gets called by parent for debugging, we can still handle requests
+    // here if origin does not match
+    // todo: test if this is true in reality aswell
     fn origin(&self) -> &LowerName {
-        &self.0.lower
+        // &self.0.lower
+        panic!("Test if this gets called")
     }
 
     async fn lookup(
@@ -173,7 +178,8 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
         _rtype: RecordType,
         _options: LookupOptions,
     ) -> Result<LookupRecords, LookupError> {
-        Ok(LookupRecords::Empty)
+        // Ok(LookupRecords::Empty)
+        panic!("Test if this gets called")
     }
 
     // todo: fix tracing
@@ -260,7 +266,7 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
     }
 
     async fn soa_secure(&self, _options: LookupOptions) -> Result<LookupRecords, LookupError> {
-        self.soa().await
+        Err(LookupError::ResponseCode(ResponseCode::Refused))
     }
 }
 
