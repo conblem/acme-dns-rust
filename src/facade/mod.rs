@@ -38,3 +38,46 @@ struct InMemoryFacadeInner {
 }
 
 type InMemoryFacadeGuard<'a> = MutexGuard<'a, InMemoryFacadeInner>;
+
+#[cfg(test)]
+mod tests {
+    use once_cell::sync::OnceCell;
+    use sqlx::PgPool;
+    use std::ops::Deref;
+    use testcontainers::clients::Cli;
+    use testcontainers::images::postgres::Postgres;
+    use testcontainers::Container;
+
+    use crate::setup_database;
+
+    static CLIENT: OnceCell<Cli> = OnceCell::new();
+
+    pub(super) struct TestPool {
+        pool: PgPool,
+        _container: Container<'static, Postgres>,
+    }
+
+    impl Deref for TestPool {
+        type Target = PgPool;
+
+        fn deref(&self) -> &Self::Target {
+            &self.pool
+        }
+    }
+
+    pub(super) async fn test_pool() -> TestPool {
+        let client = CLIENT.get_or_init(Cli::default);
+        let container = client.run(Postgres::default());
+
+        let connection_string = &format!(
+            "postgres://postgres:postgres@localhost:{}/postgres",
+            container.get_host_port(5432)
+        );
+
+        let pool = setup_database(connection_string).await.unwrap();
+        TestPool {
+            pool,
+            _container: container,
+        }
+    }
+}

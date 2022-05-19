@@ -289,59 +289,72 @@ impl CertFacade for InMemoryFacade {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::facade::Domain;
-    use testcontainers::clients::Cli;
-    use testcontainers::images::postgres::Postgres;
+    use rstest::*;
+    use tokio::runtime::Runtime;
 
+    use super::super::tests::TestPool;
     use super::{Cert, CertFacade, DatabaseFacade, State};
-    use crate::setup_database;
-    use crate::util::{now, to_i64};
+    use crate::facade::{Domain, DomainFacade};
+    use crate::util::{now, to_i64, uuid};
 
-    fn create_domain() -> Domain {
+    #[fixture]
+    #[once]
+    fn runtime() -> Runtime {
+        Runtime::new().unwrap()
+    }
+
+    #[fixture]
+    #[once]
+    fn test_pool(runtime: &Runtime, domain: &Domain) -> TestPool {
+        runtime.block_on(async {
+            let pool = super::super::tests::test_pool().await;
+            let facade = DatabaseFacade::from(pool.clone());
+            facade.create_domain(&domain).await.unwrap();
+
+            pool
+        })
+    }
+
+    #[fixture]
+    #[once]
+    fn domain() -> Domain {
         Domain {
-            id: "0e1f8297564a420eb260749d9f5ddd45".to_string(),
+            id: uuid(),
             password: "$2b$12$zTUOFwfVurULlALrEHdn7OK0it3BRNy43FOb2Qos1PGOPd/YCPVg.".to_string(),
             txt: Some("TXT Content".to_string()),
             username: "6f791bc4494846ba997562c85d03b940".to_string(),
         }
     }
 
-    pub(crate) fn create_cert(domain: &Domain) -> Cert {
+    #[fixture]
+    fn cert(domain: &Domain) -> Cert {
         Cert {
-            id: "1".to_owned(),
+            id: uuid(),
             update: to_i64(now()),
             state: State::Ok,
-            // todo: this is the wrong cert and key only to fix compilation
             cert: Some(include_str!("../../tests/leaf.crt").to_owned()),
             private: Some(include_str!("../../tests/leaf.key").to_owned()),
             domain: domain.id.clone(),
         }
     }
 
-    #[cfg(not(feature = "disable-docker"))]
-    #[tokio::test]
-    async fn test_postgres_cert_facade() {
-        let docker = Cli::default();
-        let node = docker.run(Postgres::default());
+    //#[cfg(not(feature = "disable-docker"))]
+    #[rstest]
+    fn test_postgres_cert_facade(runtime: &Runtime, test_pool: &TestPool, mut cert: Cert) {
+        runtime.block_on(async {
+            let facade = DatabaseFacade::from((**test_pool).clone());
 
-        let connection_string = &format!(
-            "postgres://postgres:postgres@localhost:{}/postgres",
-            node.get_host_port(5432)
-        );
+            facade.create_cert(&cert).await.unwrap();
 
-        let pool = setup_database(connection_string).await.unwrap();
-        let facade = DatabaseFacade::from(pool);
-        let domain = create_domain();
-        let mut cert = create_cert(&domain);
+            // check if we received create cert from database
+            let actual = facade.first_cert().await.unwrap().unwrap();
+            assert_eq!(cert, actual);
 
-        facade.create_cert(&cert).await.unwrap();
-
-        let actual = facade.first_cert().await.unwrap().unwrap();
-        assert_eq!(cert, actual);
-
-        cert.state = State::Updating;
-        facade.update_cert(&cert).await.unwrap();
-        let actual = facade.first_cert().await.unwrap().unwrap();
-        assert_eq!(cert, actual);
+            // check if we receive update cert from database
+            cert.state = State::Updating;
+            facade.update_cert(&cert).await.unwrap();
+            let actual = facade.first_cert().await.unwrap().unwrap();
+            assert_eq!(cert, actual);
+        })
     }
 }
