@@ -287,7 +287,7 @@ impl CertFacade for InMemoryFacade {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "disable-docker")))]
 pub(crate) mod tests {
     use rstest::*;
     use tokio::runtime::Runtime;
@@ -338,7 +338,6 @@ pub(crate) mod tests {
         }
     }
 
-    //#[cfg(not(feature = "disable-docker"))]
     #[rstest]
     fn test_postgres_cert_facade(runtime: &Runtime, test_pool: &TestPool, mut cert: Cert) {
         runtime.block_on(async {

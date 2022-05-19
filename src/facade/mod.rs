@@ -39,7 +39,7 @@ struct InMemoryFacadeInner {
 
 type InMemoryFacadeGuard<'a> = MutexGuard<'a, InMemoryFacadeInner>;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "disable-docker")))]
 mod tests {
     use once_cell::sync::OnceCell;
     use sqlx::PgPool;

@@ -151,7 +151,7 @@ impl DomainFacade for InMemoryFacade {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "disable-docker")))]
 pub(crate) mod tests {
     use testcontainers::clients::Cli;
     use testcontainers::images::postgres::Postgres;
@@ -168,7 +168,6 @@ pub(crate) mod tests {
         }
     }
 
-    //#[cfg(not(feature = "disable-docker"))]
     #[tokio::test]
     async fn test_postgres_domain_facade() {
         let docker = Cli::default();
