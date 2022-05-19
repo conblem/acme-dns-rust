@@ -34,12 +34,15 @@ impl RequestHandler for TraceRequestHandler {
         response_handle: R,
     ) -> ResponseInfo {
         let info = request.request_info();
-        let name = info.query.name().to_string();
+        let query = info.query;
+
+        let name = query.name().to_string();
         let addr = info.src;
-        let query_type = info.query.query_type();
+        let query_type = query.query_type();
+        let id = info.header.id();
 
         let span =
-            info_span!(parent: &self.span, "request", remote.addr = %addr, %name, %query_type);
+            info_span!(parent: &self.span, "request", remote.addr = %addr, %name, %query_type, %id);
 
         let timer = DNS_REQ_HISTOGRAM
             .with_label_values(&[name.as_str()])

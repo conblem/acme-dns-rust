@@ -9,4 +9,12 @@ services:
     volumes:
       - ./postgres:/data
     ports:
-      - 5432:5432
+      - "5432:5432"
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  grafana:
+    image: grafana/grafana-oss
+    ports:
+      - "3000:3000"

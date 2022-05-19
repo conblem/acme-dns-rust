@@ -5,14 +5,12 @@ use std::net::IpAddr::V4;
 use std::str;
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::field::display;
-use tracing::{debug, info, Span};
+use tracing::{debug, info};
 use trust_dns_server::authority::{
     Authority, AuthorityObject, LookupError, LookupOptions, LookupRecords, MessageRequest,
     UpdateResult, ZoneType,
 };
 use trust_dns_server::client::rr::LowerName;
-use trust_dns_server::proto::op::ResponseCode;
 use trust_dns_server::proto::rr::rdata::{SOA, TXT};
 use trust_dns_server::proto::rr::record_data::RData;
 use trust_dns_server::proto::rr::{Name, Record, RecordSet, RecordType};
@@ -168,16 +166,37 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
     // here if origin does not match
     // todo: test if this is true in reality aswell
     fn origin(&self) -> &LowerName {
-        // &self.0.lower
-        panic!("Test if this gets called")
+        &self.0.lower
     }
 
+    // fix handling of this as this always take self.origin
+    // also admin is always same serial numbers need to match
     async fn lookup(
         &self,
         _name: &LowerName,
-        _rtype: RecordType,
+        record_type: RecordType,
         _options: LookupOptions,
     ) -> Result<LookupRecords, LookupError> {
+        if record_type == RecordType::SOA {
+            let origin: Name = self.origin().into();
+
+            let soa = SOA::new(
+                origin.clone(),
+                origin.clone(),
+                1,
+                28800,
+                7200,
+                604800,
+                86400,
+            );
+            let record = Record::from_rdata(origin, 100, RData::SOA(soa));
+            let record_set = Arc::new(record.into());
+
+            return Ok(LookupRecords::new(LookupOptions::default(), record_set));
+        }
+        if record_type == RecordType::NS {
+            return Ok(LookupRecords::Empty);
+        }
         // Ok(LookupRecords::Empty)
         panic!("Test if this gets called")
     }
@@ -191,11 +210,7 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
         let authority = Arc::clone(&self.0);
         let name = Name::from(request_info.query.name());
         let query_type = request_info.query.query_type();
-        let span = Span::current();
-        span.record("name", &display(&name));
-        span.record("query_type", &display(&query_type));
 
-        // not sure if this handling makes sense
         if query_type == RecordType::SOA {
             return self.soa().await;
         }
@@ -205,10 +220,6 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
             Some(first) => first,
             None => return Ok(LookupRecords::Empty),
         };
-
-        if name.is_empty() {
-            return Ok(LookupRecords::Empty);
-        }
 
         // no error handling needed we just try the other lookups
         if let Ok(Some(pre)) = authority.lookup_pre(&name, &query_type).await {
@@ -243,30 +254,6 @@ impl<F: DomainFacade + CertFacade + Send + Sync + 'static> Authority for Databas
         _options: LookupOptions,
     ) -> Result<Self::Lookup, LookupError> {
         Ok(LookupRecords::Empty)
-    }
-
-    // fix handling of this as this always take self.origin
-    // also admin is always same serial numbers need to match
-    async fn soa(&self) -> Result<LookupRecords, LookupError> {
-        let origin: Name = self.origin().into();
-
-        let soa = SOA::new(
-            origin.clone(),
-            origin.clone(),
-            1,
-            28800,
-            7200,
-            604800,
-            86400,
-        );
-        let record = Record::from_rdata(origin, 100, RData::SOA(soa));
-        let record_set = Arc::new(record.into());
-
-        Ok(LookupRecords::new(LookupOptions::default(), record_set))
-    }
-
-    async fn soa_secure(&self, _options: LookupOptions) -> Result<LookupRecords, LookupError> {
-        Err(LookupError::ResponseCode(ResponseCode::Refused))
     }
 }
 
