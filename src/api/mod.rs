@@ -3,8 +3,8 @@ use futures_util::future::{Future, OptionFuture};
 use futures_util::stream::Stream;
 use futures_util::{FutureExt, StreamExt, TryFutureExt};
 use hyper::server::conn::Http;
-use lazy_static::lazy_static;
 use metrics::{metrics, metrics_wrapper, MetricsConfig};
+use once_cell::sync::Lazy;
 use prometheus::{register_int_counter_vec, register_int_gauge_vec, IntCounterVec, IntGaugeVec};
 use std::fmt::Display;
 use std::sync::Arc;
@@ -22,20 +22,22 @@ mod proxy;
 mod routes;
 pub mod tls;
 
-lazy_static! {
-    static ref TCP_TOTAL_CONNECTION_COUNTER: IntCounterVec = register_int_counter_vec!(
+static TCP_TOTAL_CONNECTION_COUNTER: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
         "tcp_total_connection_counter",
         "Sum of TCP Connections",
         &["endpoint"]
     )
-    .unwrap();
-    static ref TCP_OPEN_CONNECTION_COUNTER: IntGaugeVec = register_int_gauge_vec!(
+    .unwrap()
+});
+static TCP_OPEN_CONNECTION_COUNTER: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
         "tcp_open_connection_counter",
         "Amount of currently open TCP Connections",
         &["endpoint"]
     )
-    .unwrap();
-}
+    .unwrap()
+});
 
 async fn serve<I, S, T, E, R>(mut io: I, routes: R, endpoint: &str)
 where

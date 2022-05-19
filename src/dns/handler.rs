@@ -1,18 +1,18 @@
 use async_trait::async_trait;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use prometheus::{register_histogram_vec, HistogramVec};
 use tracing::{info_span, Instrument, Span};
 use trust_dns_server::authority::Catalog;
 use trust_dns_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 
-lazy_static! {
-    static ref DNS_REQ_HISTOGRAM: HistogramVec = register_histogram_vec!(
+static DNS_REQ_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
+    register_histogram_vec!(
         "dns_request_duration_seconds",
         "The DNS request latencies in seconds.",
         &["name"]
     )
-    .unwrap();
-}
+    .unwrap()
+});
 
 pub(super) struct TraceRequestHandler {
     catalog: Catalog,

@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, Encoder, HistogramVec, IntCounterVec,
     Registry, TextEncoder,
@@ -14,20 +14,22 @@ use warp::path::FullPath;
 use warp::reply::Response as WarpResponse;
 use warp::{Filter, Rejection, Reply};
 
-lazy_static! {
-    static ref HTTP_STATUS_COUNTER: IntCounterVec = register_int_counter_vec!(
+static HTTP_STATUS_COUNTER: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
         "http_status_counter",
         "The HTTP requests status",
         &["path", "method", "status"]
     )
-    .unwrap();
-    static ref HTTP_REQ_HISTOGRAM: HistogramVec = register_histogram_vec!(
+    .unwrap()
+});
+static HTTP_REQ_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
+    register_histogram_vec!(
         "http_request_duration_seconds",
         "The HTTP request latencies in seconds.",
         &["path", "method"]
     )
-    .unwrap();
-}
+    .unwrap()
+});
 
 pub(crate) enum MetricsConfig {
     Borrowed(&'static str),
