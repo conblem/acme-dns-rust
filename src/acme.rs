@@ -54,7 +54,7 @@ impl Persist for DatabasePersist {
     #[tracing::instrument(name = "DatabasePersist::put", err, skip(self))]
     fn put<'a>(&self, key: &PersistKey<'a>, value: &[u8]) -> acme_lib::Result<()> {
         let PersistKey { key, realm, kind } = key;
-        let realm = to_i64(realm);
+        let realm = to_i64(*realm);
         let kind = persist_kind(kind);
         let transaction = self.pool.begin();
 
@@ -89,7 +89,7 @@ impl Persist for DatabasePersist {
             "SELECT (value) FROM acme WHERE key = $1 AND realm = $2 AND kind = $3 LIMIT 1",
         )
         .bind(key)
-        .bind(to_i64(realm))
+        .bind(to_i64(*realm))
         .bind(persist_kind(kind))
         .fetch(&self.pool);
 

@@ -61,7 +61,7 @@ impl ServerCertVerifier for TestVerifier {
 async fn test() -> Result<()> {
     let cert = Cert {
         id: "1".to_owned(),
-        update: to_i64(&now()),
+        update: to_i64(now()),
         state: State::Ok,
         // todo: wrong files just to fix compilation
         cert: Some(include_str!("./leaf.crt").to_owned()),

@@ -38,7 +38,7 @@ impl Cert {
     fn new(domain: &Domain) -> Self {
         Cert {
             id: Uuid::new_v4().simple().to_string(),
-            update: to_i64(&now()),
+            update: to_i64(now()),
             state: State::Updating,
             cert: None,
             private: None,
@@ -151,7 +151,7 @@ impl CertFacade for DatabaseFacade<Postgres> {
             }
             // cert is in updating state as there are only to cert.state
             Some(mut cert) => {
-                let now = to_i64(&now());
+                let now = to_i64(now());
                 let one_hour_ago = now - HOUR_IN_SECONDS as i64;
                 // longer ago than 1 hour so probably timed out
                 if cert.update < one_hour_ago {
@@ -246,7 +246,7 @@ impl CertFacade for InMemoryFacade {
                 Some(cert)
             }
             Some(mut cert) => {
-                let now = to_i64(&now());
+                let now = to_i64(now());
                 let one_hour_ago = now - HOUR_IN_SECONDS as i64;
                 // longer ago than 1 hour so probably timed out
                 if cert.update < one_hour_ago {
@@ -309,7 +309,7 @@ pub(crate) mod tests {
     pub(crate) fn create_cert(domain: &Domain) -> Cert {
         Cert {
             id: "1".to_owned(),
-            update: to_i64(&now()),
+            update: to_i64(now()),
             state: State::Ok,
             // todo: this is the wrong cert and key only to fix compilation
             cert: Some(include_str!("../../tests/leaf.crt").to_owned()),

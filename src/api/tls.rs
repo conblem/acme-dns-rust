@@ -128,7 +128,7 @@ where
             return Ok(TlsAcceptor::from(Arc::clone(server_config)));
         }
     };
-    info!(timestamp = to_u64(&db_cert.update), "Found new cert");
+    info!(timestamp = to_u64(db_cert.update), "Found new cert");
 
     let server_config = match create_server_config(&db_cert) {
         Ok(server_config) => server_config,
@@ -177,15 +177,35 @@ fn create_server_config(db_cert: &Cert) -> Result<Arc<ServerConfig>> {
     Ok(Arc::new(config))
 }
 
+// todo: fix theses tests
 #[cfg(test)]
 mod tests {
-    use super::create_server_config;
-    use crate::facade::cert::tests::create_cert;
-    use crate::facade::Cert;
+    use rstest::*;
 
-    #[test]
-    fn test_create_server_config_alpn() {
-        let cert = create_cert();
+    use super::create_server_config;
+    use crate::facade::{Cert, State};
+    use crate::util::{now, to_i64, uuid};
+
+    const CERT: Option<&str> = Some(include_str!("../../tests/leaf.crt"));
+    const PRIVATE: Option<&str> = Some(include_str!("../../tests/leaf.key"));
+
+    #[fixture]
+    fn cert(
+        #[default(CERT)] cert_inner: Option<&str>,
+        #[default(PRIVATE)] private: Option<&str>,
+    ) -> Cert {
+        Cert {
+            id: uuid(),
+            cert: cert_inner.map(str::to_string),
+            private: private.map(str::to_string),
+            update: to_i64(now()),
+            domain: "example.com".to_string(),
+            state: State::Ok,
+        }
+    }
+
+    #[rstest]
+    fn test_create_server_config_alpn(cert: Cert) {
         let config = create_server_config(&cert).unwrap();
         let alpn = &config.alpn_protocols;
         assert_eq!("h2".as_bytes(), &alpn[0]);
@@ -200,29 +220,21 @@ mod tests {
     }
 
     // useless but 100% coverage is still nice
-    #[test]
+    #[rstest]
     #[should_panic]
-    fn panic_unwrap_create_server_config_error() {
-        let cert = create_cert();
+    fn panic_unwrap_create_server_config_error(cert: Cert) {
         unwrap_err_create_server_config(&cert);
     }
 
-    #[test]
-    fn test_empty_cert() {
-        let mut cert = create_cert();
-        cert.cert = None;
-        cert.private = None;
-
+    #[rstest]
+    fn test_empty_cert(#[with(None, None)] cert: Cert) {
         let error = unwrap_err_create_server_config(&cert);
         assert!(error.contains(&format!("{:?}", cert)));
         assert!(error.contains("has no Cert or Private"));
     }
 
-    #[test]
-    fn test_invalid_private() {
-        let mut cert = create_cert();
-        *cert.private.as_mut().unwrap() = "WRONG".to_owned();
-
+    #[rstest]
+    fn test_invalid_private(#[with(CERT, Some("WRONG"))] cert: Cert) {
         let error = unwrap_err_create_server_config(&cert);
 
         // todo: investigate
@@ -230,13 +242,10 @@ mod tests {
         assert!(error.contains("Private Vec is empty"));
     }
 
-    #[test]
+    #[rstest]
     #[should_panic]
     // todo: rustls does no cert validation so this test panics
-    fn test_invalid_cert() {
-        let mut cert = create_cert();
-        *cert.cert.as_mut().unwrap() = "WRONG".to_owned();
-
+    fn test_invalid_cert(#[with(Some("WRONG"))] cert: Cert) {
         let error = unwrap_err_create_server_config(&cert);
         assert!(error.contains("Cert is invalid"));
     }
