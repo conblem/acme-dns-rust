@@ -1,0 +1,21 @@
+[package]
+name = "acme-dns-rust"
+version = "0.1.0"
+authors = ["conblem <ramonwehrli@gmail.com>"]
+edition = "2018"
+license-file = "LICENSE"
+keywords = ["acme-dns", "acme", "lets-encrypt", "dns", "async"]
+categories = ["command-line-utilities"]
+repository = "https://github.com/conblem/acme-dns-rust/"
+description = "Acme DNS implementation written in Rust"
+
+[[bin]]
+name = "acme-dns-rust"
+path = "src/main.rs"
+
+[dependencies]
+tracing-subscriber = "0.3"
+sea-orm = { version = "0.8", features = ["sqlx-postgres", "runtime-tokio-rustls"]}
+
+[dev-dependencies]
+sea-orm = { version = "0.8", features = ["mock"]}

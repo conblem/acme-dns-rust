@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "acme-dns-rust",
+    "migration"
+]
