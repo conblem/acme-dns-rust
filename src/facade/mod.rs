@@ -67,17 +67,14 @@ mod tests {
 
     pub(super) async fn test_pool() -> TestPool {
         let client = CLIENT.get_or_init(Cli::default);
-        let container = client.run(Postgres::default());
+        let _container = client.run(Postgres::default());
 
         let connection_string = &format!(
             "postgres://postgres:postgres@localhost:{}/postgres",
-            container.get_host_port(5432)
+            _container.get_host_port(5432)
         );
 
         let pool = setup_database(connection_string).await.unwrap();
-        TestPool {
-            pool,
-            _container: container,
-        }
+        TestPool { pool, _container }
     }
 }

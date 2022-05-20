@@ -152,38 +152,29 @@ impl DomainFacade for InMemoryFacade {
 }
 
 #[cfg(all(test, not(feature = "disable-docker")))]
-pub(crate) mod tests {
-    use testcontainers::clients::Cli;
-    use testcontainers::images::postgres::Postgres;
+mod tests {
+    use rstest::*;
 
     use super::{DatabaseFacade, Domain, DomainFacade};
-    use crate::setup_database;
+    use crate::util::uuid;
 
-    pub(crate) fn create_domain() -> Domain {
+    #[fixture]
+    fn domain() -> Domain {
         Domain {
-            id: "0e1f8297564a420eb260749d9f5ddd45".to_string(),
+            id: uuid(),
             password: "$2b$12$zTUOFwfVurULlALrEHdn7OK0it3BRNy43FOb2Qos1PGOPd/YCPVg.".to_string(),
             txt: Some("TXT Content".to_string()),
             username: "6f791bc4494846ba997562c85d03b940".to_string(),
         }
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn test_postgres_domain_facade() {
-        let docker = Cli::default();
-        let node = docker.run(Postgres::default());
+    async fn test_postgres_domain_facade(mut domain: Domain) {
+        let pool = super::super::tests::test_pool().await;
+        let facade = DatabaseFacade::from(pool.clone());
 
-        let connection_string = &format!(
-            "postgres://postgres:postgres@localhost:{}/postgres",
-            node.get_host_port(5432)
-        );
-
-        let pool = setup_database(connection_string).await.unwrap();
-        let facade = DatabaseFacade::from(pool);
-
-        let mut domain = create_domain();
         facade.create_domain(&domain).await.unwrap();
-
         let actual = facade.find_domain_by_id(&domain.id).await.unwrap().unwrap();
         assert_eq!(domain, actual);
 
