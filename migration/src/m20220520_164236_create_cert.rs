@@ -18,7 +18,7 @@ impl MigrationTrait for Migration {
                     .table(cert::Entity)
                     .col(
                         ColumnDef::new(cert::Column::Id)
-                            .string()
+                            .uuid()
                             .not_null()
                             .primary_key(),
                     )
@@ -30,7 +30,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(cert::Column::State).integer().not_null())
                     .col(ColumnDef::new(cert::Column::Cert).string())
                     .col(ColumnDef::new(cert::Column::Private).string())
-                    .col(ColumnDef::new(cert::Column::DomainId).string().not_null())
+                    .col(ColumnDef::new(cert::Column::DomainId).uuid().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("domain")
