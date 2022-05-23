@@ -14,8 +14,11 @@ name = "acme-dns-rust"
 path = "src/main.rs"
 
 [dependencies]
+entity = { path = "../entity" }
 tracing-subscriber = "0.3"
 sea-orm = { version = "0.8", features = ["sqlx-postgres", "runtime-tokio-rustls"]}
+async-trait = "0.1"
+anyhow = "1"
 
 [dev-dependencies]
 sea-orm = { version = "0.8", features = ["mock"]}
