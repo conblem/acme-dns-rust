@@ -1,43 +1,52 @@
 use std::marker::PhantomData;
 use std::thread::JoinHandle;
 
-/// used to make sure parker do not get swapped with different threads
-/// ```compile_fail
-/// let _handle = UnsyncRAIIRef::new(|parker| {
-///     let inner = std::thread::spawn(move || {
-///         parker.park()
-///     });
-///     inner.unpark();
-///     inner.join().unwrap()
-/// });
-/// ```
-//type PhantomNotSendSync = PhantomData<*const ()>;
-type PhantomNotSendSync = ();
+type PhantomNotSendSync = PhantomData<*const ()>;
 
 #[derive(Default)]
 struct ParkCalledTokenInner(PhantomNotSendSync);
-pub(crate) struct ParkCalledToken(ParkCalledTokenInner);
 
-pub(crate) struct Parker(PhantomNotSendSync);
+/// Is !Send and !Sync
+/// otherwise the code below would compile
+/// this would make it possible to get a ParkCalledToken without the Thread being parked
+/// ```compile_fail
+/// use acme_dns_rust::util::UnsyncRAIIRef;
+///
+/// UnsyncRAIIRef::new(|parker| {
+///     // spawn an inner Thread and move the parker into it
+///     let inner = std::thread::spawn(move || {
+///         parker.park()
+///     });
+///     // unpark inner thread
+///     inner.thread().unpark();
+///     // receive ParkerCalledToken from joining the inner thread
+///     let park_called_token = inner.join().unwrap();
+///     // now we have the park_called_token without the thread being parked
+///     park_called_token
+/// });
+/// ```
+pub struct ParkCalledToken(ParkCalledTokenInner);
+
+pub struct Parker;
 
 impl Parker {
-    pub(crate) fn park(self) -> ParkCalledToken {
+    pub fn park(self) -> ParkCalledToken {
         std::thread::park();
         ParkCalledToken(ParkCalledTokenInner::default())
     }
 }
 
-pub(crate) struct UnsyncRAIIRef {
+pub struct UnsyncRAIIRef {
     handle: Option<JoinHandle<()>>,
 }
 
 impl UnsyncRAIIRef {
-    pub(crate) fn new<T>(initializer: T) -> Self
+    pub fn new<T>(initializer: T) -> Self
     where
         T: FnOnce(Parker) -> ParkCalledToken + Send + 'static,
     {
         let handle = std::thread::spawn(move || {
-            initializer(Parker(PhantomNotSendSync::default()));
+            initializer(Parker);
         });
 
         Self {
