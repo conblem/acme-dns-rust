@@ -15,6 +15,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "entity",
+ "migration",
  "once_cell",
  "rstest",
  "sea-orm",

@@ -77,6 +77,7 @@ impl<T: Into<Value>> ToSet<T> for ActiveValue<T> {
 mod tests {
     use async_trait::async_trait;
     use entity::domain;
+    use migration::{Migrator, MigratorTrait};
     use rstest::*;
     use sea_orm::prelude::Uuid;
     use sea_orm::{
@@ -90,19 +91,70 @@ mod tests {
 
     use crate::facade::{DomainFacade, DomainFacadeImpl};
 
+    enum ParkerStatus {
+        Parked,
+        Unparked,
+    }
+
+    struct Parker(ParkerStatus);
+
+    impl Parker {
+        fn park(&mut self) {
+            self.0 = ParkerStatus::Parked;
+            std::thread::park();
+        }
+    }
+
+    impl Drop for Parker {
+        fn drop(&mut self) {
+            if let ParkerStatus::Unparked = self.0 {
+                panic!("Parker::park has not been called");
+            }
+        }
+    }
+
+    // todo: export into own file and write corresponding tests
+    struct UnsyncRAIIRef {
+        handle: Option<JoinHandle<()>>,
+    }
+
+    impl UnsyncRAIIRef {
+        fn new<T>(initializer: T) -> Self
+        where
+            T: FnOnce(Parker) + Send + 'static,
+        {
+            let handle = std::thread::spawn(move || {
+                initializer(Parker(ParkerStatus::Unparked));
+            });
+
+            Self {
+                handle: Some(handle),
+            }
+        }
+    }
+
+    impl Drop for UnsyncRAIIRef {
+        fn drop(&mut self) {
+            let handle = self.handle.take().unwrap();
+            handle.thread().unpark();
+            handle.join().unwrap();
+        }
+    }
+
     struct TestContainerConnection {
         pool: DatabaseConnection,
-        handle: Option<JoinHandle<()>>,
+        _raii: UnsyncRAIIRef,
     }
 
     impl TestContainerConnection {
         async fn new() -> Self {
             let (port_sender, port_receiver) = oneshot::channel();
-            let handle = std::thread::spawn(move || {
+            let _raii = UnsyncRAIIRef::new(move |mut parker| {
                 let cli = Cli::default();
                 let container = cli.run(Postgres::default());
                 port_sender.send(container.get_host_port(5432)).unwrap();
-                std::thread::park();
+
+                parker.park();
             });
 
             let port = port_receiver.await.unwrap();
@@ -110,19 +162,10 @@ mod tests {
                 format!("postgres://postgres:postgres@localhost:{}/postgres", port);
             let pool = Database::connect(connection_string).await.unwrap();
 
-            TestContainerConnection {
-                pool,
-                handle: Some(handle),
-            }
-        }
-    }
+            // run migrations
+            Migrator::up(&pool, None).await.unwrap();
 
-    impl Drop for TestContainerConnection {
-        fn drop(&mut self) {
-            if let Some(handle) = self.handle.take() {
-                handle.thread().unpark();
-                handle.join().unwrap();
-            }
+            TestContainerConnection { pool, _raii }
         }
     }
 
@@ -210,6 +253,8 @@ mod tests {
         assert_eq!(domains.len(), 0);
     }
 
+    // because we could test the all and by_id methods using the mock db
+    // we know they are correct so we can now write tests using them
     #[rstest]
     #[tokio::test]
     async fn insert(domain_one: domain::Model, domain_two: domain::Model) {
@@ -221,5 +266,11 @@ mod tests {
 
         let actual = facade.by_id(domain_one.id).await.unwrap();
         assert_eq!(actual, domain_one);
+
+        let domain_insert = facade.insert(domain_two.clone()).await.unwrap();
+        assert_eq!(domain_insert, domain_two);
+
+        let domains = facade.all().await;
+        assert_eq!(domains.len(), 2);
     }
 }
