@@ -1,4 +1,4 @@
-mod facade;
+use acme_dns_rust::*;
 
 fn main() {
     tracing_subscriber::fmt::init();

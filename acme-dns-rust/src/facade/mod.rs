@@ -84,62 +84,12 @@ mod tests {
         ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, DbBackend, DbErr,
         ExecResult, MockDatabase, QueryResult, Statement,
     };
-    use std::thread::JoinHandle;
     use testcontainers::clients::Cli;
     use testcontainers::images::postgres::Postgres;
     use tokio::sync::oneshot;
 
     use crate::facade::{DomainFacade, DomainFacadeImpl};
-
-    enum ParkerStatus {
-        Parked,
-        Unparked,
-    }
-
-    struct Parker(ParkerStatus);
-
-    impl Parker {
-        fn park(&mut self) {
-            self.0 = ParkerStatus::Parked;
-            std::thread::park();
-        }
-    }
-
-    impl Drop for Parker {
-        fn drop(&mut self) {
-            if let ParkerStatus::Unparked = self.0 {
-                panic!("Parker::park has not been called");
-            }
-        }
-    }
-
-    // todo: export into own file and write corresponding tests
-    struct UnsyncRAIIRef {
-        handle: Option<JoinHandle<()>>,
-    }
-
-    impl UnsyncRAIIRef {
-        fn new<T>(initializer: T) -> Self
-        where
-            T: FnOnce(Parker) + Send + 'static,
-        {
-            let handle = std::thread::spawn(move || {
-                initializer(Parker(ParkerStatus::Unparked));
-            });
-
-            Self {
-                handle: Some(handle),
-            }
-        }
-    }
-
-    impl Drop for UnsyncRAIIRef {
-        fn drop(&mut self) {
-            let handle = self.handle.take().unwrap();
-            handle.thread().unpark();
-            handle.join().unwrap();
-        }
-    }
+    use crate::util::UnsyncRAIIRef;
 
     struct TestContainerConnection {
         pool: DatabaseConnection,
@@ -149,12 +99,12 @@ mod tests {
     impl TestContainerConnection {
         async fn new() -> Self {
             let (port_sender, port_receiver) = oneshot::channel();
-            let _raii = UnsyncRAIIRef::new(move |mut parker| {
+            let _raii = UnsyncRAIIRef::new(move |parker| {
                 let cli = Cli::default();
                 let container = cli.run(Postgres::default());
                 port_sender.send(container.get_host_port(5432)).unwrap();
 
-                parker.park();
+                parker.park()
             });
 
             let port = port_receiver.await.unwrap();
