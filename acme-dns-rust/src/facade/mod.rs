@@ -46,14 +46,64 @@ impl DomainFacade for DomainFacadeImpl {
     }
 }
 
-trait ToChanged<T: Into<Value>> {
+trait ToSet<T: Into<Value>> {
     fn to_set(self) -> ActiveValue<T>;
 }
-impl<T: Into<Value>> ToChanged<T> for ActiveValue<T> {
+impl<T: Into<Value>> ToSet<T> for ActiveValue<T> {
     fn to_set(mut self) -> ActiveValue<T> {
         match self.take() {
             Some(value) => Set(value),
             None => NotSet,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use entity::domain;
+    use rstest::*;
+    use sea_orm::prelude::Uuid;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    use crate::facade::{DomainFacade, DomainFacadeImpl};
+
+    #[fixture]
+    fn db() -> MockDatabase {
+        MockDatabase::new(DatabaseBackend::Postgres)
+    }
+
+    #[fixture]
+    fn domain_one() -> domain::Model {
+        domain::Model {
+            id: Uuid::from_u128(1),
+            username: "Test".to_string(),
+            password: "Password".to_string(),
+            txt: None,
+        }
+    }
+
+    #[fixture]
+    fn domain_two() -> domain::Model {
+        domain::Model {
+            id: Uuid::from_u128(10),
+            username: "username".to_string(),
+            password: "tyler".to_string(),
+            txt: Some("TXT is the shit".to_string()),
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn find_by_id(db: MockDatabase, domain_one: domain::Model, domain_two: domain::Model) {
+        let pool = db
+            .append_query_results(vec![vec![domain_one.clone(), domain_two], vec![]])
+            .into_connection();
+
+        let facade = DomainFacadeImpl { pool };
+        let domain_res = facade.by_id(domain_one.id).await.unwrap();
+        assert_eq!(domain_res, domain_one);
+
+        let domain_res = facade.by_id(Uuid::from_u128(99)).await;
+        assert_eq!(domain_res, None);
     }
 }
