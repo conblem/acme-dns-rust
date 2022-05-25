@@ -1,14 +1,12 @@
 use std::marker::PhantomData;
 use std::thread::JoinHandle;
 
-type PhantomNotSendSync = PhantomData<*const ()>;
-
-#[derive(Default)]
-struct ParkCalledTokenInner(PhantomNotSendSync);
+pub struct Parked;
+pub struct Unparked;
 
 /// Is !Send and !Sync
 /// otherwise the code below would compile
-/// this would make it possible to get a ParkCalledToken without the Thread being parked
+/// this would make it possible to get a Parker<Parked> without the Thread being parked
 /// ```compile_fail
 /// use acme_dns_rust::util::UnsyncRAIIRef;
 ///
@@ -19,20 +17,18 @@ struct ParkCalledTokenInner(PhantomNotSendSync);
 ///     });
 ///     // unpark inner thread
 ///     inner.thread().unpark();
-///     // receive ParkerCalledToken from joining the inner thread
-///     let park_called_token = inner.join().unwrap();
+///     // receive Parker<Parked> from joining the inner thread
+///     let parked_parker = inner.join().unwrap();
 ///     // now we have the park_called_token without the thread being parked
-///     park_called_token
+///     parked_parker
 /// });
 /// ```
-pub struct ParkCalledToken(ParkCalledTokenInner);
+pub struct Parker<T>(PhantomData<*const T>);
 
-pub struct Parker;
-
-impl Parker {
-    pub fn park(self) -> ParkCalledToken {
+impl Parker<Unparked> {
+    pub fn park(self) -> Parker<Parked> {
         std::thread::park();
-        ParkCalledToken(ParkCalledTokenInner::default())
+        Parker(PhantomData)
     }
 }
 
@@ -43,10 +39,10 @@ pub struct UnsyncRAIIRef {
 impl UnsyncRAIIRef {
     pub fn new<T>(initializer: T) -> Self
     where
-        T: FnOnce(Parker) -> ParkCalledToken + Send + 'static,
+        T: FnOnce(Parker<Unparked>) -> Parker<Parked> + Send + 'static,
     {
         let handle = std::thread::spawn(move || {
-            initializer(Parker);
+            initializer(Parker(PhantomData));
         });
 
         Self {
