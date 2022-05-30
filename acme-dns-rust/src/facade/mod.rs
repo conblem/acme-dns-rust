@@ -91,12 +91,12 @@ mod tests {
     use crate::facade::{DomainFacade, DomainFacadeImpl};
     use crate::util::UnsyncRAIIRef;
 
-    struct TestContainerConnection {
-        pool: DatabaseConnection,
+    struct PostgresContainer {
         _raii: UnsyncRAIIRef,
+        connection_string: String,
     }
 
-    impl TestContainerConnection {
+    impl PostgresContainer {
         async fn new() -> Self {
             let (port_sender, port_receiver) = oneshot::channel();
             let _raii = UnsyncRAIIRef::new(move |parker| {
@@ -110,12 +110,34 @@ mod tests {
             let port = port_receiver.await.unwrap();
             let connection_string =
                 format!("postgres://postgres:postgres@localhost:{}/postgres", port);
-            let pool = Database::connect(connection_string).await.unwrap();
+
+            Self {
+                _raii,
+                connection_string,
+            }
+        }
+
+        fn connection_string(&self) -> &str {
+            &self.connection_string
+        }
+    }
+
+    struct TestContainerConnection {
+        pool: DatabaseConnection,
+        _container: PostgresContainer,
+    }
+
+    impl TestContainerConnection {
+        async fn new() -> Self {
+            let _container = PostgresContainer::new().await;
+            let pool = Database::connect(_container.connection_string())
+                .await
+                .unwrap();
 
             // run migrations
             Migrator::up(&pool, None).await.unwrap();
 
-            TestContainerConnection { pool, _raii }
+            TestContainerConnection { pool, _container }
         }
     }
 

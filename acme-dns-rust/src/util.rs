@@ -23,6 +23,15 @@ pub struct Unparked;
 ///     parked_parker
 /// });
 /// ```
+/// The inner field of the Parker is also private to prevent
+/// instantiation in user code
+/// ```compile_fail
+/// use std::marker::PhantomData;
+/// use acme_dns_rust::util::{Parker, Unparked};
+///
+/// let parker: Parker<Unparked> = Parker(PhantomData);
+/// parker.park();
+/// ```
 pub struct Parker<T>(PhantomData<*const T>);
 
 impl Parker<Unparked> {
@@ -61,7 +70,6 @@ impl Drop for UnsyncRAIIRef {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
@@ -70,7 +78,8 @@ mod tests {
     #[test]
     fn test_unsync() {
         struct NotSendAndSync {
-            _rc: Rc<()>,
+            // *const () is !Send and !Sync
+            _not_send_and_sync: PhantomData<*const ()>,
             has_dropped: Arc<AtomicBool>,
         }
 
@@ -85,7 +94,7 @@ mod tests {
 
         let handle = UnsyncRAIIRef::new(move |parker| {
             let _not_send_and_sync = NotSendAndSync {
-                _rc: Rc::new(()),
+                _not_send_and_sync: PhantomData,
                 has_dropped,
             };
             parker.park()
@@ -94,9 +103,11 @@ mod tests {
         let has_dropped = has_dropped_clone;
         assert!(!has_dropped.load(Ordering::Relaxed));
 
-        handle_is_sync_and_send(handle);
+        // also drops handle
+        check_is_sync_and_send(handle);
+        // handle has been dropped so has_dropped should be true
         assert!(has_dropped.load(Ordering::Relaxed));
     }
 
-    fn handle_is_sync_and_send<T: Sync + Send>(_handle: T) {}
+    fn check_is_sync_and_send<T: Sync + Send>(_handle: T) {}
 }
