@@ -19,16 +19,20 @@ thread_local! {
 
 trait ResolverCache: Send + Sync {
     fn ms_since_last_checked(&self) -> u128;
+    fn get_cached(&self) -> Option<Arc<CertifiedKey>>;
+    fn set_cached(&self, key: Arc<CertifiedKey>);
 }
 
 struct ResolverCacheImpl {
     last_checked: &'static LocalKey<Cell<Instant>>,
+    cached: &'static LocalKey<Cell<Option<Arc<CertifiedKey>>>>,
 }
 
 impl ResolverCacheImpl {
     fn new() -> Self {
         Self {
             last_checked: &LAST_CHECKED,
+            cached: &CACHED,
         }
     }
 }
@@ -37,6 +41,23 @@ impl ResolverCache for ResolverCacheImpl {
     fn ms_since_last_checked(&self) -> u128 {
         let last_checked = self.last_checked.with(Cell::get);
         Instant::now().duration_since(last_checked).as_millis()
+    }
+
+    fn get_cached(&self) -> Option<Arc<CertifiedKey>> {
+        let cached = self.cached.with(Cell::take);
+        if let Some(cached) = &cached {
+            let cached = Some(Arc::clone(cached));
+            self.cached.with(move |tls_cached| tls_cached.set(cached));
+        }
+
+        cached
+    }
+
+    fn set_cached(&self, key: Arc<CertifiedKey>) {
+        self.cached
+            .with(move |tls_cached| tls_cached.set(Some(key)));
+        self.last_checked
+            .with(|tls_last_checked| tls_last_checked.set(Instant::now()));
     }
 }
 
@@ -50,7 +71,13 @@ impl SharedCachingCertResolverController {
         let this = Self {
             inner: Arc::clone(&inner),
         };
-        let resolver = Arc::new(SharedCachingCertResolver { inner });
+        let resolver = Arc::new(SharedCachingCertResolver {
+            inner,
+            cache: ResolverCacheImpl {
+                last_checked: &LAST_CHECKED,
+                cached: &CACHED,
+            },
+        });
 
         (this, resolver)
     }
@@ -61,36 +88,21 @@ impl SharedCachingCertResolverController {
     }
 }
 
-struct SharedCachingCertResolver {
+struct SharedCachingCertResolver<T> {
     inner: Arc<RwLock<Arc<CertifiedKey>>>,
+    cache: T,
 }
 
-impl ResolvesServerCert for SharedCachingCertResolver {
+impl<T: ResolverCache> ResolvesServerCert for SharedCachingCertResolver<T> {
     fn resolve(&self, _client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
-        let last_checked = LAST_CHECKED.with(Cell::get);
-        let since_last_checked = Instant::now().duration_since(last_checked);
-
-        // cache has not run out yet
-        if since_last_checked.as_millis() < CACHING_TIME_MS {
-            let cached = CACHED.with(|cached| cached.take());
-            if let Some(cached) = cached {
-                // put cached back
-                CACHED.with({
-                    let cached = Arc::clone(&cached);
-                    move |empty_cached| empty_cached.set(Some(cached))
-                });
-                return Some(cached);
+        if self.cache.ms_since_last_checked() < CACHING_TIME_MS {
+            if let Some(cached_key) = self.cache.get_cached() {
+                return Some(cached_key);
             }
         }
-
-        let lock = self.inner.read().unwrap();
-        let key = Arc::clone(&*lock);
-        CACHED.with({
-            let key = Arc::clone(&key);
-            move |empty_cached| empty_cached.set(Some(key))
-        });
-        LAST_CHECKED.with(|last_checked| last_checked.set(Instant::now()));
-
+        let guard = self.inner.read().unwrap();
+        let key = Arc::clone(&*guard);
+        self.cache.set_cached(Arc::clone(&key));
         Some(key)
     }
 }
