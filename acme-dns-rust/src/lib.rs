@@ -2,6 +2,8 @@ pub mod facade;
 pub mod util;
 
 use std::cell::Cell;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 use std::thread::LocalKey;
 use std::time::Instant;
@@ -18,9 +20,11 @@ thread_local! {
 }
 
 trait ResolverCache: Send + Sync {
+    type Guard: DerefMut<Target = Option<Arc<CertifiedKey>>>;
+
     fn ms_since_last_checked(&self) -> u128;
-    fn get_cached(&self) -> Option<Arc<CertifiedKey>>;
-    fn set_cached(&self, key: Arc<CertifiedKey>);
+    fn set_last_checked(&self);
+    fn key(&self) -> Self::Guard;
 }
 
 struct ResolverCacheImpl {
@@ -37,27 +41,56 @@ impl ResolverCacheImpl {
     }
 }
 
+struct ResolverCacheGuard {
+    cached: &'static LocalKey<Cell<Option<Arc<CertifiedKey>>>>,
+    key: Option<Arc<CertifiedKey>>,
+    _not_send_and_sync: PhantomData<*const ()>,
+}
+
+impl Drop for ResolverCacheGuard {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            self.cached
+                .with(move |tls_cached| tls_cached.set(Some(key)));
+        }
+    }
+}
+
+impl Deref for ResolverCacheGuard {
+    type Target = Option<Arc<CertifiedKey>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.key
+    }
+}
+
+impl DerefMut for ResolverCacheGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.key
+    }
+}
+
 impl ResolverCache for ResolverCacheImpl {
+    type Guard = ResolverCacheGuard;
+
     fn ms_since_last_checked(&self) -> u128 {
         let last_checked = self.last_checked.with(Cell::get);
         Instant::now().duration_since(last_checked).as_millis()
     }
 
-    fn get_cached(&self) -> Option<Arc<CertifiedKey>> {
-        let cached = self.cached.with(Cell::take);
-        if let Some(cached) = &cached {
-            let cached = Some(Arc::clone(cached));
-            self.cached.with(move |tls_cached| tls_cached.set(cached));
-        }
-
-        cached
-    }
-
-    fn set_cached(&self, key: Arc<CertifiedKey>) {
-        self.cached
-            .with(move |tls_cached| tls_cached.set(Some(key)));
+    fn set_last_checked(&self) {
         self.last_checked
             .with(|tls_last_checked| tls_last_checked.set(Instant::now()));
+    }
+
+    fn key(&self) -> Self::Guard {
+        let key = self.cached.with(Cell::take);
+
+        ResolverCacheGuard {
+            cached: self.cached,
+            key,
+            _not_send_and_sync: PhantomData,
+        }
     }
 }
 
@@ -66,20 +99,20 @@ struct SharedCachingCertResolverController {
 }
 
 impl SharedCachingCertResolverController {
-    fn new() -> (Self, Arc<dyn ResolvesServerCert>) {
-        let inner = Arc::new(RwLock::new(Arc::new(todo!())));
+    fn new(initial: Arc<CertifiedKey>) -> (Self, Arc<dyn ResolvesServerCert>) {
+        let inner = Arc::new(RwLock::new(initial));
         let this = Self {
             inner: Arc::clone(&inner),
         };
-        let resolver = Arc::new(SharedCachingCertResolver {
+        let resolver = SharedCachingCertResolver {
             inner,
             cache: ResolverCacheImpl {
                 last_checked: &LAST_CHECKED,
                 cached: &CACHED,
             },
-        });
+        };
 
-        (this, resolver)
+        (this, Arc::new(resolver))
     }
 
     fn set_cert(&self, cert: Arc<CertifiedKey>) {
@@ -95,15 +128,28 @@ struct SharedCachingCertResolver<T> {
 
 impl<T: ResolverCache> ResolvesServerCert for SharedCachingCertResolver<T> {
     fn resolve(&self, _client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        let mut cached_key = self.cache.key();
+        let cached_key = cached_key.deref_mut();
+
         if self.cache.ms_since_last_checked() < CACHING_TIME_MS {
-            if let Some(cached_key) = self.cache.get_cached() {
-                return Some(cached_key);
+            if let Some(cached_key) = cached_key {
+                return Some(Arc::clone(cached_key));
             }
         }
+
         let guard = self.inner.read().unwrap();
-        let key = Arc::clone(&*guard);
-        self.cache.set_cached(Arc::clone(&key));
-        Some(key)
+
+        self.cache.set_last_checked();
+        // check if we already have the newest key in the cache
+        match cached_key {
+            Some(cached_key) if Arc::ptr_eq(cached_key, &*guard) => {
+                return Some(Arc::clone(cached_key))
+            }
+            _ => {}
+        }
+
+        *cached_key = Some(Arc::clone(&*guard));
+        Some(Arc::clone(&*guard))
     }
 }
 
