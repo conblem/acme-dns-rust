@@ -11,6 +11,9 @@ path = "src/lib.rs"
 [dependencies]
 entity = { path = "../entity" }
 
+[dev-dependencies]
+async-std = "1"
+
 [dependencies.sea-orm-migration]
 version = "^0"
 features = ["sqlx-postgres", "runtime-tokio-rustls"]

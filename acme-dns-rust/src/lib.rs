@@ -2,15 +2,11 @@ pub mod facade;
 pub mod util;
 
 use std::cell::Cell;
-use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 use std::thread::LocalKey;
 use std::time::Instant;
 use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
 use tokio_rustls::rustls::sign::CertifiedKey;
-
-const CACHING_TIME_MS: u128 = 10_000;
 
 // this cache is probably useless and introduces unnecessary complexity
 // but it's my project after all
@@ -96,11 +92,11 @@ mod tests {
     use rustls_pemfile::Item;
     use std::cell::Cell;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     use tokio_rustls::rustls::server::ResolvesServerCert;
     use tokio_rustls::rustls::sign::CertifiedKey;
     use tokio_rustls::rustls::{
-        Certificate, ClientConfig, ClientConnection, PrivateKey, RootCertStore, ServerConfig,
+        Certificate, ClientConfig, PrivateKey, RootCertStore, ServerConfig,
     };
 
     #[fixture]
