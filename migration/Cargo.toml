@@ -10,8 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 entity = { path = "../entity" }
-
-[dev-dependencies]
+# todo: fix this useless dep
 async-std = "1"
 
 [dependencies.sea-orm-migration]

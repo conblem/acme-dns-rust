@@ -41,11 +41,16 @@ jobs:
             target
           key: coverage-${{ hashFiles('**/Cargo.lock') }}
       - name: Generate code coverage
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v1
         with:
           files: lcov.info
           fail_ci_if_error: true
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v3
+        if: always() # always run even if the previous step fails
+        with:
+          report_paths: 'target/nextest/default/junit.xml'
   fmt:
     runs-on: ubuntu-latest
     steps:
