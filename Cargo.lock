@@ -19,7 +19,7 @@ dependencies = [
  "prometheus",
  "rstest",
  "rustls 0.20.6",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.1",
  "serde",
  "serde_test",
  "sqlx",
@@ -1611,6 +1611,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-pemfile"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0864aeff53f8c05aa08d86e5ef839d3dfcf07aeba2db32f12db0ef716e87bd55"
+dependencies = [
+ "base64",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2433,7 +2442,7 @@ dependencies = [
  "rand",
  "ring",
  "rustls 0.20.6",
- "rustls-pemfile",
+ "rustls-pemfile 0.3.0",
  "serde",
  "smallvec",
  "thiserror",
