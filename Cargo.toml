@@ -36,7 +36,7 @@ futures-util = "0.3"
 # only use this feature in test config
 rustls = { version = "0.20", features = ["dangerous_configuration"]}
 # update in the future 1.0 is already released
-rustls-pemfile = "0.3.0"
+rustls-pemfile = "1.0.2"
 toml = "0.5"
 anyhow = "1.0"
 ppp = "1"
