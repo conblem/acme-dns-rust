@@ -48,7 +48,7 @@ serde_test = "1.0"
 tracing-test = "0.2"
 tokio-test = "0.4"
 testcontainers = "0.13"
-rstest = "0.12"
+rstest = "0.17"
 
 [features]
 default = ["postgres"]
